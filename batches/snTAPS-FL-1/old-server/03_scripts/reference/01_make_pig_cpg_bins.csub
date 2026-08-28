@@ -1,0 +1,24 @@
+#!/bin/bash
+#CSUB -J pig_cpg_bins
+#CSUB -q c02
+#CSUB -n 2
+#CSUB -o 09_logs/reference/pig_cpg_bins.out
+#CSUB -e 09_logs/reference/pig_cpg_bins.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+cd "$PROJECT"
+
+mkdir -p 02_reference/pig/cpg_bins
+mkdir -p 09_logs/reference
+
+python3 03_scripts/reference/01_make_pig_cpg_bins.py \
+  --fasta 02_reference/pig/genome.fa \
+  --chrom-sizes 02_reference/pig/pig.primary.chrom.sizes \
+  --outdir 02_reference/pig/cpg_bins \
+  --bin-size 100000 \
+  --min-cpg 20
+
+echo "[INFO] done at $(date)"

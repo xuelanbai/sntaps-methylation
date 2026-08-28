@@ -1,0 +1,15 @@
+#!/bin/bash
+#CSUB -J P7_gtf_marker
+#CSUB -q c02
+#CSUB -n 8
+#CSUB -o 09_logs/annotation/P7_gtf_marker_from_partial.out
+#CSUB -e 09_logs/annotation/P7_gtf_marker_from_partial.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/annotation/P7_gtf_marker_from_partial.py "/share/org/YZWL/yzwl_wujx/Projects/FOODIE/refs/pig/genes.gtf.gz"

@@ -1,0 +1,31 @@
+#!/bin/bash
+#CSUB -J filt_bal_prom
+#CSUB -q c02
+#CSUB -n 4
+#CSUB -R 'span[hosts=1]'
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+#CSUB -o 09_logs/region_umap_paper/filt_balanced_core_promoter.out
+#CSUB -e 09_logs/region_umap_paper/filt_balanced_core_promoter.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+mkdir -p 09_logs/region_umap_paper
+
+PY=/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python
+SCRIPT=03_scripts/region_matrix_paper/70_filter_region_counts_by_cell_list.py
+
+PROM_RAW=08_qc_summary/final_single_sample/region_matrix/snTAPS-FL-1.strict2.promoter_TSS_1.5kb.region_counts.tsv.gz
+OUTDIR=08_qc_summary/final_single_sample/region_matrix_balanced_core
+mkdir -p "$OUTDIR"
+
+for n in 10000 5000 2000; do
+  echo "[INFO] filter promoter matrix for balanced_core${n}"
+
+  $PY "$SCRIPT" \
+    --region-counts "$PROM_RAW" \
+    --cell-list "08_qc_summary/final_single_sample/cell_filter_balanced_core/snTAPS-FL-1.balanced_core${n}.global_per_cb.tsv" \
+    --out "$OUTDIR/snTAPS-FL-1.balanced_core${n}.promoter_TSS_1.5kb.region_counts.tsv.gz"
+done
+
+echo "[INFO] done"

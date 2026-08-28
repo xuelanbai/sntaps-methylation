@@ -1,0 +1,25 @@
+#!/bin/bash
+#CSUB -J prom_obs2k
+#CSUB -q c02
+#CSUB -n 8
+#CSUB -R 'span[hosts=1]'
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+#CSUB -o 09_logs/region_umap_paper/promoter_observed_core2000.out
+#CSUB -e 09_logs/region_umap_paper/promoter_observed_core2000.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+PY=/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python
+
+$PY 03_scripts/region_matrix_paper/62_umap_promoter_observed_distance.py \
+  --region-counts 08_qc_summary/final_single_sample/region_matrix/snTAPS-FL-1.strict2.promoter_TSS_1.5kb.region_counts.tsv.gz \
+  --cell-qc 08_qc_summary/final_single_sample/cell_filter_balanced_core/snTAPS-FL-1.balanced_core2000.global_per_cb.tsv \
+  --outdir 08_qc_summary/final_single_sample/region_umap_paper/promoter_observed_distance_core2000 \
+  --prefix snTAPS-FL-1.promoter_observed_core2000_mincov1 \
+  --min-cov 1 \
+  --n-top-regions 500 \
+  --min-region-cells 30 \
+  --min-regions-per-cell 20 \
+  --n-clusters 8 \
+  --seed 1

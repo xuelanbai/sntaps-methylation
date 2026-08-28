@@ -1,0 +1,14 @@
+#!/bin/bash
+#CSUB -J P7_all_marker
+#CSUB -q c02
+#CSUB -n 4
+#CSUB -R 'span[hosts=1]'
+#CSUB -o 09_logs/annotation/P7_all_marker.out
+#CSUB -e 09_logs/annotation/P7_all_marker.err
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+set -eo pipefail
+mkdir -p 09_logs/annotation
+
+PY=/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python3
+$PY 03_scripts/annotation/90_P7_all_cluster_marker_modules.py

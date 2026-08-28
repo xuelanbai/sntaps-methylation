@@ -1,0 +1,41 @@
+#!/bin/bash
+#CSUB -J taps_full_8
+#CSUB -q c02
+#CSUB -n 4
+#CSUB -o 09_logs/call_taps_full/snTAPS-FL-1_snTAPS-FL-1-8.full.out
+#CSUB -e 09_logs/call_taps_full/snTAPS-FL-1_snTAPS-FL-1-8.full.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+SAMPLE=snTAPS-FL-1_snTAPS-FL-1-8
+OUTDIR=${PROJECT}/08_qc_summary/downstream_test/${SAMPLE}
+
+cd "$PROJECT"
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+mkdir -p "$OUTDIR" 09_logs/call_taps_full
+
+echo "[INFO] start full calling: $(date)"
+echo "[INFO] sample: $SAMPLE"
+
+echo "[INFO] BAM list:"
+cat ${OUTDIR}/${SAMPLE}.bam.list
+
+echo "[INFO] whitelist:"
+wc -l ${OUTDIR}/${SAMPLE}.CB.whitelist.readpairs_ge1000.txt
+
+python3 03_scripts/20_call_taps_cpg_bins_by_cb.py \
+  --bam-list ${OUTDIR}/${SAMPLE}.bam.list \
+  --fasta 02_reference/pig/genome.fa \
+  --bins 02_reference/pig/cpg_bins/pig_100kb_bins.cpg20.bed \
+  --whitelist ${OUTDIR}/${SAMPLE}.CB.whitelist.readpairs_ge1000.txt \
+  --out-prefix ${OUTDIR}/${SAMPLE}.full \
+  --min-mapq 30 \
+  --min-baseq 20 \
+  --max-reads 0 \
+  2> ${OUTDIR}/${SAMPLE}.full.call.log
+
+echo "[INFO] done full calling: $(date)"

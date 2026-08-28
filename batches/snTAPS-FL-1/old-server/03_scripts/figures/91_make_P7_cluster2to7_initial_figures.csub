@@ -1,0 +1,14 @@
+#!/bin/bash
+#CSUB -J P7_figs
+#CSUB -q c02
+#CSUB -n 4
+#CSUB -o 09_logs/figures/P7_figs.out
+#CSUB -e 09_logs/figures/P7_figs.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+mkdir -p 09_logs/figures
+
+PY=/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python3
+$PY 03_scripts/figures/91_make_P7_cluster2to7_initial_figures.py

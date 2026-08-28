@@ -1,0 +1,55 @@
+#!/bin/bash
+#CSUB -J merge_CpG_site_conversion
+#CSUB -q c02
+#CSUB -n 2
+#CSUB -o 09_logs/merge_site_conversion/merge_CpG_site_conversion.out
+#CSUB -e 09_logs/merge_site_conversion/merge_CpG_site_conversion.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+INDIR="08_qc_summary/final_single_sample/site_conversion"
+OUTDIR="08_qc_summary/final_single_sample/site_conversion_merged"
+mkdir -p "$OUTDIR"
+
+OUT="$OUTDIR/snTAPS-FL-1.all_chr.CpG_site_conversion.tsv.gz"
+TMP="$OUTDIR/snTAPS-FL-1.all_chr.CpG_site_conversion.tmp.tsv"
+
+rm -f "$TMP" "$OUT"
+
+echo "[INFO] merge CpG site_conversion files"
+
+first=1
+for c in {1..18} X Y; do
+  f="$INDIR/snTAPS-FL-1.${c}.CpG_site_conversion.tsv.gz"
+
+  if [[ ! -s "$f" ]]; then
+    echo "[ERROR] missing file: $f" >&2
+    exit 1
+  fi
+
+  echo "[INFO] adding chr$c: $f"
+
+  if [[ "$first" -eq 1 ]]; then
+    zcat "$f" >> "$TMP"
+    first=0
+  else
+    zcat "$f" | awk 'NR>1' >> "$TMP"
+  fi
+done
+
+gzip -c "$TMP" > "$OUT"
+rm -f "$TMP"
+
+echo "[INFO] output: $OUT"
+echo "[INFO] header:"
+zcat "$OUT" | head -1
+
+echo "[INFO] first lines:"
+zcat "$OUT" | head -5
+
+echo "[INFO] chrom counts:"
+zcat "$OUT" | awk 'NR>1{cnt[$1]++} END{for(c in cnt) print c,cnt[c]}' | sort -V
+
+echo "[DONE]"

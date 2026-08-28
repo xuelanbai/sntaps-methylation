@@ -1,0 +1,42 @@
+#!/bin/bash
+#CSUB -J tapsL_5_L2
+#CSUB -q c02
+#CSUB -n 8
+#CSUB -o 09_logs/call_taps_full_by_lane/snTAPS-FL-1_snTAPS-FL-1-5_L2.full.out
+#CSUB -e 09_logs/call_taps_full_by_lane/snTAPS-FL-1_snTAPS-FL-1-5_L2.full.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+SAMPLE=snTAPS-FL-1_snTAPS-FL-1-5
+LANE=L2
+BAM=06_align/bam_by_lane/snTAPS-FL-1_snTAPS-FL-1-5/snTAPS-FL-1_snTAPS-FL-1-5_L2.sorted.bam
+OUTDIR=${PROJECT}/08_qc_summary/downstream_test/${SAMPLE}
+LANEDIR=${OUTDIR}/by_lane
+
+cd "$PROJECT"
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+mkdir -p "$LANEDIR"
+
+echo "[INFO] start lane calling: $(date)"
+echo "[INFO] sample: $SAMPLE"
+echo "[INFO] lane: $LANE"
+echo "[INFO] bam: $BAM"
+
+echo "$BAM" > ${LANEDIR}/${SAMPLE}_${LANE}.bam.list
+
+python3 03_scripts/20_call_taps_cpg_bins_by_cb.py \
+  --bam-list ${LANEDIR}/${SAMPLE}_${LANE}.bam.list \
+  --fasta 02_reference/pig/genome.fa \
+  --bins 02_reference/pig/cpg_bins/pig_100kb_bins.cpg20.bed \
+  --whitelist ${OUTDIR}/${SAMPLE}.CB.whitelist.readpairs_ge1000.txt \
+  --out-prefix ${LANEDIR}/${SAMPLE}_${LANE}.full \
+  --min-mapq 30 \
+  --min-baseq 20 \
+  --max-reads 0 \
+  2> ${LANEDIR}/${SAMPLE}_${LANE}.full.call.log
+
+echo "[INFO] done lane calling: $(date)"

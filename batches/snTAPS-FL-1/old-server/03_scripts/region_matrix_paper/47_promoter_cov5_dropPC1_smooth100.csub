@@ -1,0 +1,30 @@
+#!/bin/bash
+#CSUB -J prom_cov5
+#CSUB -q c02
+#CSUB -n 32
+#CSUB -o 09_logs/region_umap_paper/promoter_cov5_dropPC1_smooth100.out
+#CSUB -e 09_logs/region_umap_paper/promoter_cov5_dropPC1_smooth100.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/region_matrix_paper/44_umap_region_matrix_paper_fast.py \
+  --region-counts 08_qc_summary/final_single_sample/region_matrix_covfilter/snTAPS-FL-1.strict2.promoter_TSS_1.5kb.cov5.region_counts.tsv.gz \
+  --global-qc 08_qc_summary/final_single_sample/region_matrix/strict2_cells.global_qc.tsv \
+  --outdir 08_qc_summary/final_single_sample/region_umap_paper/P9_promoter_residual_cov5_dropPC1_smooth100 \
+  --prefix snTAPS-FL-1.promoter_residual_cov5_dropPC1_smooth100 \
+  --mode residual \
+  --max-cells 0 \
+  --min-cell-regions 500 \
+  --min-region-cells 1000 \
+  --top-variable-regions 2000 \
+  --regress-qc \
+  --drop-pc1 \
+  --n-pcs 30 \
+  --n-neighbors 100 \
+  --min-dist 0.4 \
+  --n-clusters 8 \
+  --n-jobs 32

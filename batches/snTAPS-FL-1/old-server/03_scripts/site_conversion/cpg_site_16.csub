@@ -1,0 +1,22 @@
+#!/bin/bash
+#CSUB -J cpgconv_16
+#CSUB -q c02
+#CSUB -n 8
+#CSUB -o 09_logs/site_conversion/cpgconv_16.out
+#CSUB -e 09_logs/site_conversion/cpgconv_16.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/29_call_cpg_site_conversion_by_chrom.py \
+  --bam-list 08_qc_summary/final_single_sample/site_conversion/all_64_bam.list \
+  --fasta 02_reference/pig/genome.fa \
+  --chrom 16 \
+  --whitelist 08_qc_summary/final_single_sample/site_conversion/final_CB.whitelist.txt \
+  --out 08_qc_summary/final_single_sample/site_conversion/snTAPS-FL-1.16.CpG_site_conversion.tsv.gz \
+  --min-mapq 30 \
+  --min-baseq 20

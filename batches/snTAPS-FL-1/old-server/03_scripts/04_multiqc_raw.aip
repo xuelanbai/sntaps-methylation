@@ -1,0 +1,28 @@
+#!/bin/bash
+#CSUB -J snTAPS_multiqc_raw
+#CSUB -q c02
+#CSUB -n 2
+#CSUB -o 09_logs/snTAPS_multiqc_raw.out
+#CSUB -e 09_logs/snTAPS_multiqc_raw.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+cd "${PROJECT}"
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate foodie_env
+
+mkdir -p 08_qc_summary/multiqc_raw 09_logs
+
+echo "[INFO] multiqc path:"
+which multiqc
+multiqc --version
+
+multiqc \
+  04_fastqc/raw \
+  -o 08_qc_summary/multiqc_raw \
+  -n snTAPS_raw_multiqc.html
+
+echo "[INFO] MultiQC finished at $(date)"

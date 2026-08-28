@@ -1,0 +1,30 @@
+#!/bin/bash
+#CSUB -J all100kb_core5000_seurat_qcreg_minbin1250_top1000
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -R 'span[hosts=1]'
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+#CSUB -o 09_logs/region_umap_paper/filteredCB_100kb_fixed/all100kb_core5000_seurat_qcreg_minbin1250_top1000.out
+#CSUB -e 09_logs/region_umap_paper/filteredCB_100kb_fixed/all100kb_core5000_seurat_qcreg_minbin1250_top1000.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python 03_scripts/34_umap_100kb_qcregress_fast.py \
+  --global-qc "08_qc_summary/final_single_sample/cell_filter_balanced_core/snTAPS-FL-1.balanced_core5000.global_per_cb.tsv" \
+  --bin-counts "08_qc_summary/final_single_sample/snTAPS-FL-1.all_technical_merged.bin_counts.tsv.gz" \
+  --outdir "08_qc_summary/final_single_sample/region_umap_paper/filteredCB_100kb_fixed/all100kb_core5000_seurat_qcreg_minbin1250_top1000" \
+  --prefix "snTAPS-FL-1.all100kb_core5000_seurat_qcreg_minbin1250_top1000" \
+  --mode seurat_norm \
+  --qc-keys reads_used,modified_rate \
+  --cellbin-min-cov 1 \
+  --min-bin-cells "1250" \
+  --top-variable-bins "1000" \
+  --min-selected-bins 100 \
+  --n-pcs 30 \
+  --n-clusters 8 \
+  --n-neighbors 30 \
+  --min-dist 0.3 \
+  --n-components 2 \
+  --n-jobs 16 \
+  --seed 1

@@ -1,0 +1,15 @@
+#!/bin/bash
+#CSUB -J annot_island
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -o 09_logs/annotation/fast_island_annotation_promoter.out
+#CSUB -e 09_logs/annotation/fast_island_annotation_promoter.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/annotation/fast_island_annotation_promoter.py

@@ -1,0 +1,23 @@
+#!/bin/bash
+#CSUB -J promoter_core5000_obs_covfirst_minCell5_top1000_k4
+#CSUB -q c02
+#CSUB -n 8
+#CSUB -R 'span[hosts=1]'
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+#CSUB -o 09_logs/region_umap_paper/promoter_observed_covfirst_now/promoter_core5000_obs_covfirst_minCell5_top1000_k4.out
+#CSUB -e 09_logs/region_umap_paper/promoter_observed_covfirst_now/promoter_core5000_obs_covfirst_minCell5_top1000_k4.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python 03_scripts/region_matrix_paper/63_umap_promoter_observed_covfirst.py \
+  --region-counts "08_qc_summary/final_single_sample/region_matrix/snTAPS-FL-1.strict2.promoter_TSS_1.5kb.region_counts.tsv.gz" \
+  --cell-qc "08_qc_summary/final_single_sample/cell_filter_expected_real_cells/snTAPS-FL-1.expected_realcell_top5000.global_per_cb.tsv" \
+  --outdir "08_qc_summary/final_single_sample/region_umap_paper/promoter_observed_covfirst_now/promoter_core5000_obs_covfirst_minCell5_top1000_k4" \
+  --prefix "snTAPS-FL-1.promoter_core5000_obs_covfirst_minCell5_top1000_k4" \
+  --min-cov 1 \
+  --n-top-regions 1000 \
+  --min-region-cells "5" \
+  --min-regions-per-cell 3 \
+  --n-clusters 4 \
+  --seed 1

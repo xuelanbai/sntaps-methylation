@@ -1,0 +1,78 @@
+#!/bin/bash
+#CSUB -J snTAPS_fastp_split64
+#CSUB -q c02
+#CSUB -n 64
+#CSUB -o 09_logs/snTAPS_fastp_after_split64.out
+#CSUB -e 09_logs/snTAPS_fastp_after_split64.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+PAIR_TABLE=${PROJECT}/08_qc_summary/fastp_after_split_pair_table.tsv
+OUTROOT=${PROJECT}/05_fastp/after_split
+
+cd "$PROJECT"
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_qc
+
+mkdir -p "$OUTROOT"
+mkdir -p 09_logs/fastp_after_split
+mkdir -p 08_qc_summary/fastp_after_split
+
+echo "[INFO] fastp path:"
+which fastp
+fastp --version
+
+echo "[INFO] pair table:"
+wc -l "$PAIR_TABLE"
+
+run_one_fastp() {
+    sample="$1"
+    lane="$2"
+    r1="$3"
+    r2="$4"
+
+    outdir="${OUTROOT}/${sample}"
+    mkdir -p "$outdir"
+
+    out1="${outdir}/${sample}_${lane}.fastp_R1.fq.gz"
+    out2="${outdir}/${sample}_${lane}.fastp_R2.fq.gz"
+    html="${outdir}/${sample}_${lane}.fastp.html"
+    json="${outdir}/${sample}_${lane}.fastp.json"
+    log="${PROJECT}/09_logs/fastp_after_split/${sample}_${lane}.fastp.log"
+
+    if [ -s "$out1" ] && [ -s "$out2" ] && [ -s "$html" ] && [ -s "$json" ]; then
+        echo "[INFO] skip existing ${sample} ${lane}" > "$log"
+        return 0
+    fi
+
+    rm -f "$out1" "$out2" "$html" "$json"
+
+    echo "[INFO] start ${sample} ${lane}: $(date)" > "$log"
+    echo "[INFO] R1=$r1" >> "$log"
+    echo "[INFO] R2=$r2" >> "$log"
+
+    fastp \
+      -i "$r1" \
+      -I "$r2" \
+      -o "$out1" \
+      -O "$out2" \
+      --detect_adapter_for_pe \
+      --qualified_quality_phred 20 \
+      --length_required 30 \
+      --thread 4 \
+      --html "$html" \
+      --json "$json" \
+      >> "$log" 2>&1
+
+    echo "[INFO] done ${sample} ${lane}: $(date)" >> "$log"
+}
+
+export -f run_one_fastp
+export PROJECT OUTROOT
+
+# 64核策略：同时跑16个lane，每个lane fastp用4线程
+tail -n +2 "$PAIR_TABLE" | xargs -P 16 -n 4 bash -c 'run_one_fastp "$@"' _
+
+echo "[INFO] all fastp after split finished: $(date)"

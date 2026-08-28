@@ -1,0 +1,25 @@
+#!/bin/bash
+#CSUB -J promoter_cov10_q25q75_core2000_residual_depthOnly
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -R 'span[hosts=1]'
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+#CSUB -o 09_logs/region_umap_paper/promoter_qcregress_rescue/promoter_cov10_q25q75_core2000_residual_depthOnly.out
+#CSUB -e 09_logs/region_umap_paper/promoter_qcregress_rescue/promoter_cov10_q25q75_core2000_residual_depthOnly.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python 03_scripts/region_matrix_paper/58_umap_region_qcregress_fast.py \
+  --region-counts "08_qc_summary/final_single_sample/region_matrix_covfilter/snTAPS-FL-1.strict2.promoter_TSS_1.5kb.cov10.region_counts.tsv.gz" \
+  --cell-qc "08_qc_summary/final_single_sample/cell_filter_strict_qc_core/snTAPS-FL-1.strict_qc_core_q25_q75_ge100k.core2000.global_per_cb.tsv" \
+  --outdir "08_qc_summary/final_single_sample/region_umap_paper/promoter_qcregress_rescue/promoter_cov10_q25q75_core2000_residual_depthOnly" \
+  --prefix "snTAPS-FL-1.promoter_cov10_q25q75_core2000_residual_depthOnly" \
+  --mode "residual" \
+  --qc-keys "reads_used" \
+  --n-top-regions 3000 \
+  --min-region-cells 100 \
+  --min-regions-per-cell 20 \
+  --n-pcs 30 \
+  --n-clusters 8 \
+  --seed 1

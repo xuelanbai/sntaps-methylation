@@ -1,0 +1,23 @@
+#!/bin/bash
+#CSUB -J promoter_mat
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -o 09_logs/region_matrix/promoter_mat.out
+#CSUB -e 09_logs/region_matrix/promoter_mat.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/region_matrix/40_call_region_matrix_by_cb.py \
+  --bam-list 08_qc_summary/final_single_sample/region_matrix/all_64_bam.list \
+  --regions 02_reference/pig/gene_regions/pig_promoter_TSS_1.5kb.bed \
+  --fasta 02_reference/pig/genome.fa \
+  --whitelist 08_qc_summary/final_single_sample/region_matrix/strict2_CB.whitelist.txt \
+  --out-prefix 08_qc_summary/final_single_sample/region_matrix/snTAPS-FL-1.strict2.promoter_TSS_1.5kb \
+  --min-mapq 30 \
+  --min-baseq 20 \
+  --min-region-cov 5

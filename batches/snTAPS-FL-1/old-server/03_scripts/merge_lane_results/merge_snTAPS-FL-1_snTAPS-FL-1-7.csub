@@ -1,0 +1,12 @@
+#!/bin/bash
+#CSUB -J merge_7
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -o 09_logs/merge_lane_results/snTAPS-FL-1_snTAPS-FL-1-7.merge.out
+#CSUB -e 09_logs/merge_lane_results/snTAPS-FL-1_snTAPS-FL-1-7.merge.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+bash 03_scripts/25_merge_lane_taps_one_sample.sh snTAPS-FL-1_snTAPS-FL-1-7

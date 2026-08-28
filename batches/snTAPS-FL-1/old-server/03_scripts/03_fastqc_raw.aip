@@ -1,0 +1,32 @@
+#!/bin/bash
+#CSUB -J snTAPS_fastqc_raw
+#CSUB -q c02
+#CSUB -n 8
+#CSUB -o 09_logs/snTAPS_fastqc_raw.out
+#CSUB -e 09_logs/snTAPS_fastqc_raw.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+RAWDIR=${PROJECT}/01_rawdata
+OUTDIR=${PROJECT}/04_fastqc/raw
+
+cd "${PROJECT}"
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate foodie_env
+
+mkdir -p "${OUTDIR}" "${PROJECT}/09_logs"
+
+echo "[INFO] fastqc path:"
+which fastqc
+fastqc --version
+
+find "${RAWDIR}" -name "*.fq.gz" | sort > "${OUTDIR}/raw_fastq.list"
+
+echo "[INFO] fastq number:"
+wc -l "${OUTDIR}/raw_fastq.list"
+
+echo "[INFO] start FastQC at $(date)"
+cat "${OUTDIR}/raw_fastq.list" | xargs -n 1 -P 8 fastqc -t 1 -o "${OUTDIR}"
+echo "[INFO] FastQC finished at $(date)"

@@ -1,0 +1,262 @@
+import pandas as pd
+import numpy as np
+from pathlib import Path
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+# ====== 路径设置 ======
+RUN_DIR = Path("08_qc_summary/final_single_sample/region_umap_paper/P7_promoter_residual_all_dropPC1_smooth100")
+OUT = Path("08_qc_summary/final_single_sample/doublet_check")
+OUT.mkdir(parents=True, exist_ok=True)
+
+QC = Path("08_qc_summary/final_single_sample/snTAPS-FL-1.all_technical_merged.global_per_cb.tsv")
+REGION_MATRIX = Path("08_qc_summary/final_single_sample/region_matrix_covfilter/snTAPS-FL-1.strict2.promoter_TSS_1.5kb.cov10.region_counts.tsv.gz")
+
+# 自动找UMAP文件
+umap_files = sorted(RUN_DIR.glob("*.umap.tsv"))
+if len(umap_files) == 0:
+    raise FileNotFoundError(f"No *.umap.tsv found in {RUN_DIR}")
+UMAP = umap_files[0]
+
+# 自动找marker表
+marker_candidates = []
+for pat in ["*marker*.tsv", "*hypomethylation*.tsv", "*cluster_specific*.tsv", "*delta*.tsv"]:
+    marker_candidates.extend(sorted(RUN_DIR.glob(pat)))
+    marker_candidates.extend(sorted(Path("08_qc_summary/final_single_sample").glob(f"**/{pat}")))
+
+marker_candidates = [p for p in marker_candidates if "P7" in str(p) or "promoter" in str(p)]
+if len(marker_candidates) == 0:
+    raise FileNotFoundError("No marker table found. Please check marker result filename.")
+
+MARKER = marker_candidates[0]
+
+print("UMAP =", UMAP)
+print("QC =", QC)
+print("REGION_MATRIX =", REGION_MATRIX)
+print("MARKER =", MARKER)
+
+# ====== 读入UMAP和QC ======
+umap = pd.read_csv(UMAP, sep="\t")
+qc = pd.read_csv(QC, sep="\t")
+
+# 自动识别列名
+def pick_col(df, candidates):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    raise ValueError(f"Cannot find any of columns: {candidates}; available={list(df.columns)}")
+
+cb_col_umap = pick_col(umap, ["CB", "barcode", "cell", "cell_id"])
+cluster_col = pick_col(umap, ["cluster", "Cluster", "island", "leiden", "label"])
+cb_col_qc = pick_col(qc, ["CB", "barcode", "cell", "cell_id"])
+
+df = umap.merge(qc, left_on=cb_col_umap, right_on=cb_col_qc, how="left")
+df["cluster_str"] = df[cluster_col].astype(str)
+
+# ====== QC高值疑似双胞 ======
+for col in ["reads_used", "covered_calls", "covered_bins"]:
+    if col not in df.columns:
+        raise ValueError(f"{col} not found in QC table")
+
+qc_thresholds = {
+    "reads_used_q99": df["reads_used"].quantile(0.99),
+    "covered_calls_q99": df["covered_calls"].quantile(0.99),
+    "covered_bins_q99": df["covered_bins"].quantile(0.99),
+}
+
+df["high_qc_doublet_like"] = (
+    (df["reads_used"] >= qc_thresholds["reads_used_q99"]) |
+    (df["covered_calls"] >= qc_thresholds["covered_calls_q99"]) |
+    (df["covered_bins"] >= qc_thresholds["covered_bins_q99"])
+)
+
+# ====== 读marker表 ======
+marker = pd.read_csv(MARKER, sep="\t")
+
+m_cluster_col = pick_col(marker, ["cluster", "Cluster"])
+m_region_col = pick_col(marker, ["region_id", "bin_id", "region", "gene_id"])
+
+# 每个cluster取top50 marker，优先按abs_delta/pvalue排序
+if "abs_delta" in marker.columns:
+    marker = marker.sort_values([m_cluster_col, "abs_delta"], ascending=[True, False])
+elif "pvalue" in marker.columns:
+    marker = marker.sort_values([m_cluster_col, "pvalue"], ascending=[True, True])
+
+top_n = 50
+marker_top = marker.groupby(m_cluster_col).head(top_n).copy()
+marker_top[m_cluster_col] = marker_top[m_cluster_col].astype(str)
+
+marker_map = dict(zip(marker_top[m_region_col].astype(str), marker_top[m_cluster_col].astype(str)))
+marker_regions = set(marker_map.keys())
+
+print("marker clusters:", sorted(marker_top[m_cluster_col].unique()))
+print("n_marker_regions:", len(marker_regions))
+
+# ====== 从region matrix里计算每个cell的marker panel activity ======
+# activity定义为 -modified_rate，即低甲基化越强，activity越高
+first = pd.read_csv(REGION_MATRIX, sep="\t", nrows=5)
+r_cb_col = pick_col(first, ["CB", "barcode", "cell", "cell_id"])
+r_region_col = pick_col(first, ["region_id", "bin_id", "region", "gene_id"])
+r_rate_col = pick_col(first, ["modified_rate", "meth_rate", "rate"])
+
+usecols = [r_cb_col, r_region_col, r_rate_col]
+partial = []
+
+for chunk in pd.read_csv(REGION_MATRIX, sep="\t", usecols=usecols, chunksize=2_000_000):
+    chunk[r_region_col] = chunk[r_region_col].astype(str)
+    chunk = chunk[chunk[r_region_col].isin(marker_regions)]
+    if chunk.empty:
+        continue
+
+    chunk["marker_cluster"] = chunk[r_region_col].map(marker_map)
+    chunk["activity"] = -chunk[r_rate_col].astype(float)
+
+    g = (
+        chunk.groupby([r_cb_col, "marker_cluster"])["activity"]
+        .agg(["sum", "count"])
+        .reset_index()
+    )
+    partial.append(g)
+
+if len(partial) == 0:
+    raise RuntimeError("No marker regions matched in region matrix.")
+
+score_long = pd.concat(partial, ignore_index=True)
+score_long = (
+    score_long.groupby([r_cb_col, "marker_cluster"])[["sum", "count"]]
+    .sum()
+    .reset_index()
+)
+score_long["activity"] = score_long["sum"] / score_long["count"]
+
+score = score_long.pivot(index=r_cb_col, columns="marker_cluster", values="activity")
+score = score.fillna(score.min().min())
+
+# 每个marker panel做z-score
+score_z = (score - score.mean(axis=0)) / score.std(axis=0).replace(0, np.nan)
+score_z = score_z.fillna(0)
+
+# marker混合阳性：至少两个marker panel z-score > 1
+n_pos = (score_z > 1.0).sum(axis=1)
+top1 = score_z.max(axis=1)
+top2 = score_z.apply(lambda x: np.sort(x.values)[-2] if len(x) >= 2 else np.nan, axis=1)
+
+mix = pd.DataFrame({
+    r_cb_col: score_z.index,
+    "n_marker_panels_z_gt_1": n_pos.values,
+    "marker_top1_z": top1.values,
+    "marker_top2_z": top2.values,
+})
+
+df = df.merge(mix, left_on=cb_col_umap, right_on=r_cb_col, how="left")
+df["n_marker_panels_z_gt_1"] = df["n_marker_panels_z_gt_1"].fillna(0)
+df["marker_top1_z"] = df["marker_top1_z"].fillna(0)
+df["marker_top2_z"] = df["marker_top2_z"].fillna(0)
+
+df["multi_marker_doublet_like"] = (
+    (df["n_marker_panels_z_gt_1"] >= 2) |
+    ((df["marker_top1_z"] >= 1.0) & (df["marker_top2_z"] >= 0.75))
+)
+
+# noise识别
+df["noise_like"] = df["cluster_str"].isin(["noise", "-1", "nan", "None"])
+
+# cluster0中疑似混合
+df["cluster0_marker_mixed"] = (
+    (df["cluster_str"] == "0") &
+    df["multi_marker_doublet_like"]
+)
+
+# 最终建议舍弃：QC高值 + marker混合 + noise
+# 这里不把cluster0整体删除，只删cluster0里marker混合的部分
+df["discard_suspect_doublet"] = (
+    df["high_qc_doublet_like"] |
+    df["noise_like"] |
+    df["cluster0_marker_mixed"]
+)
+
+# 另存一个更保守的“低置信删除版”：cluster0整体也删除
+df["discard_low_confidence_for_annotation"] = (
+    df["discard_suspect_doublet"] |
+    (df["cluster_str"] == "0")
+)
+
+# ====== 输出统计 ======
+summary = []
+summary.append(("total_cells", len(df)))
+summary.append(("cluster0_cells", int((df["cluster_str"] == "0").sum())))
+summary.append(("high_qc_doublet_like", int(df["high_qc_doublet_like"].sum())))
+summary.append(("multi_marker_doublet_like", int(df["multi_marker_doublet_like"].sum())))
+summary.append(("cluster0_marker_mixed", int(df["cluster0_marker_mixed"].sum())))
+summary.append(("noise_like", int(df["noise_like"].sum())))
+summary.append(("discard_suspect_doublet", int(df["discard_suspect_doublet"].sum())))
+summary.append(("keep_after_suspect_doublet_filter", int((~df["discard_suspect_doublet"]).sum())))
+summary.append(("discard_low_confidence_for_annotation", int(df["discard_low_confidence_for_annotation"].sum())))
+summary.append(("keep_high_confidence_annotation", int((~df["discard_low_confidence_for_annotation"]).sum())))
+
+summary_df = pd.DataFrame(summary, columns=["metric", "value"])
+summary_df.to_csv(OUT / "cluster0_doublet_check_summary.tsv", sep="\t", index=False)
+
+# cluster分层统计
+cluster_summary = (
+    df.groupby("cluster_str")
+    .agg(
+        n_cells=(cb_col_umap, "count"),
+        median_reads_used=("reads_used", "median"),
+        median_covered_calls=("covered_calls", "median"),
+        median_covered_bins=("covered_bins", "median"),
+        median_modified_rate=("modified_rate", "median"),
+        high_qc_frac=("high_qc_doublet_like", "mean"),
+        multi_marker_frac=("multi_marker_doublet_like", "mean"),
+        discard_suspect_frac=("discard_suspect_doublet", "mean"),
+    )
+    .reset_index()
+)
+cluster_summary.to_csv(OUT / "cluster_doublet_qc_marker_summary.tsv", sep="\t", index=False)
+
+# 输出细胞列表
+df.to_csv(OUT / "cell_doublet_suspect_scores.tsv", sep="\t", index=False)
+
+df.loc[df["discard_suspect_doublet"], [cb_col_umap]].drop_duplicates().to_csv(
+    OUT / "discard_suspect_doublet_cells.tsv", sep="\t", index=False, header=["CB"]
+)
+
+df.loc[~df["discard_suspect_doublet"], [cb_col_umap]].drop_duplicates().to_csv(
+    OUT / "keep_after_suspect_doublet_filter_cells.tsv", sep="\t", index=False, header=["CB"]
+)
+
+df.loc[~df["discard_low_confidence_for_annotation"], [cb_col_umap]].drop_duplicates().to_csv(
+    OUT / "keep_high_confidence_annotation_cells.tsv", sep="\t", index=False, header=["CB"]
+)
+
+# ====== 简单画图：疑似双胞位置 ======
+xcol = pick_col(df, ["UMAP1", "umap1", "UMAP_1"])
+ycol = pick_col(df, ["UMAP2", "umap2", "UMAP_2"])
+
+plt.figure(figsize=(7, 6))
+plt.scatter(df[xcol], df[ycol], s=1, c="lightgray", alpha=0.25, linewidths=0)
+sub = df[df["discard_suspect_doublet"]]
+plt.scatter(sub[xcol], sub[ycol], s=2, c="red", alpha=0.7, linewidths=0)
+plt.xlabel("UMAP1")
+plt.ylabel("UMAP2")
+plt.title("Suspect doublet / low-quality cells")
+plt.tight_layout()
+plt.savefig(OUT / "suspect_doublet_cells_on_umap.png", dpi=300)
+plt.close()
+
+# cluster0中marker混合细胞
+plt.figure(figsize=(7, 6))
+plt.scatter(df[xcol], df[ycol], s=1, c="lightgray", alpha=0.25, linewidths=0)
+sub = df[df["cluster0_marker_mixed"]]
+plt.scatter(sub[xcol], sub[ycol], s=2, c="red", alpha=0.7, linewidths=0)
+plt.xlabel("UMAP1")
+plt.ylabel("UMAP2")
+plt.title("Cluster0 cells with mixed marker activity")
+plt.tight_layout()
+plt.savefig(OUT / "cluster0_marker_mixed_cells_on_umap.png", dpi=300)
+plt.close()
+
+print(summary_df)
+print("\nCluster summary saved to:", OUT / "cluster_doublet_qc_marker_summary.tsv")
+print("Cell score table saved to:", OUT / "cell_doublet_suspect_scores.tsv")

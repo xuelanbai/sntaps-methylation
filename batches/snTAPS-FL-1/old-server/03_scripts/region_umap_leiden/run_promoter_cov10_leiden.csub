@@ -1,0 +1,14 @@
+#!/bin/bash
+#CSUB -J prom10_leiden
+#CSUB -q c02
+#CSUB -n 32
+#CSUB -o 09_logs/region_umap_leiden/promoter_cov10_leiden.out
+#CSUB -e 09_logs/region_umap_leiden/promoter_cov10_leiden.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/region_umap_leiden/run_promoter_cov10_leiden.py

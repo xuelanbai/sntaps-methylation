@@ -1,0 +1,30 @@
+#!/bin/bash
+#CSUB -J umap_G_strDrop
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -o 09_logs/umap_compare_50k/G_D_strict_dropPC1.out
+#CSUB -e 09_logs/umap_compare_50k/G_D_strict_dropPC1.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/36_umap_100kb_pc_regress_qc_dropPC1.py \
+  --global-qc 08_qc_summary/final_single_sample/snTAPS-FL-1.all_technical_merged.global_per_cb.tsv \
+  --bin-counts 08_qc_summary/final_single_sample/snTAPS-FL-1.all_technical_merged.bin_counts.tsv.gz \
+  --outdir 08_qc_summary/final_single_sample/umap_compare_50k/G_D_strict_dropPC1 \
+  --prefix snTAPS-FL-1.G_D_strict_dropPC1_50k \
+  --mode residual \
+  --max-cells 50000 \
+  --min-reads 50000 \
+  --min-covered-calls 100000 \
+  --min-covered-bins 5000 \
+  --cellbin-min-cov 10 \
+  --min-bin-cells 5000 \
+  --top-variable-bins 1000 \
+  --n-pcs 30 \
+  --n-clusters 8 \
+  --n-jobs 16
