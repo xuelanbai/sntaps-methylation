@@ -1,0 +1,27 @@
+#!/bin/bash
+#CSUB -J P12_promoter_strict_umap3d
+#CSUB -q c02
+#CSUB -n 8
+#CSUB -o 09_logs/region_umap_paper/P12_promoter_strict_umap3d.out
+#CSUB -e 09_logs/region_umap_paper/P12_promoter_strict_umap3d.err
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+source ~/.bashrc
+conda activate snTAPS_analysis
+
+python3 03_scripts/region_matrix_paper/51_umap_region_filtered_sparse.py \
+  --region-counts 08_qc_summary/final_single_sample/region_matrix_covfilter/snTAPS-FL-1.strict2.promoter_TSS_1.5kb.cov10.region_counts.tsv.gz \
+  --cell-qc 08_qc_summary/final_single_sample/cell_filter_strict_q10_q95_ge100k/snTAPS-FL-1.strict_q10_q95_ge100k.strict_qc_cells.tsv \
+  --outdir 08_qc_summary/final_single_sample/region_umap_paper/P12_promoter_strict_q10_q95_ge100k_3D \
+  --prefix snTAPS-FL-1.P12_promoter_strict_q10_q95_ge100k_3D \
+  --n-top-regions 3000 \
+  --min-region-cells 100 \
+  --min-regions-per-cell 100 \
+  --n-pcs 50 \
+  --drop-pc1 \
+  --n-components 3 \
+  --n-neighbors 30 \
+  --min-dist 0.30 \
+  --n-clusters 8 \
+  --seed -1 \
+  --n-jobs 8

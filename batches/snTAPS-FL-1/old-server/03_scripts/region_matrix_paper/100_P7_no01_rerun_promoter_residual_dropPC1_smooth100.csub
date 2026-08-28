@@ -1,0 +1,31 @@
+#!/bin/bash
+#CSUB -J P7_no01_umap
+#CSUB -q c02
+#CSUB -n 32
+#CSUB -o 09_logs/region_matrix_paper/P7_no01_umap.out
+#CSUB -e 09_logs/region_matrix_paper/P7_no01_umap.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+mkdir -p 09_logs/region_matrix_paper
+mkdir -p 08_qc_summary/final_single_sample/region_umap_paper/P7_no01_promoter_residual_dropPC1_smooth100
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/region_matrix_paper/44_umap_region_matrix_paper_fast.py \
+  --region-counts 08_qc_summary/final_single_sample/region_matrix_P7_no01/snTAPS-FL-1.P7_no01.promoter_TSS_1.5kb.region_counts.tsv.gz \
+  --global-qc 08_qc_summary/final_single_sample/region_matrix/strict2_cells.global_qc.tsv \
+  --outdir 08_qc_summary/final_single_sample/region_umap_paper/P7_no01_promoter_residual_dropPC1_smooth100 \
+  --prefix snTAPS-FL-1.P7_promoter_residual_all_dropPC1_smooth100 \
+  --mode residual \
+  --max-cells 0 \
+  --min-cell-regions 500 \
+  --min-region-cells 1000 \
+  --top-variable-regions 2000 \
+  --regress-qc \
+  --drop-pc1 \
+  --n-pcs 10 \
+  --n-neighbors 100 \
+  --min-dist 0.4 \
+  --n-clusters 6 \
+  --n-jobs 32

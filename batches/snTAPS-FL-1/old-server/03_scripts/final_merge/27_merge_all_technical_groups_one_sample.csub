@@ -1,0 +1,166 @@
+#!/bin/bash
+#CSUB -J merge_all_snTAPS_FL1
+#CSUB -q c02
+#CSUB -n 32
+#CSUB -o 09_logs/final_merge/merge_all_snTAPS_FL1.out
+#CSUB -e 09_logs/final_merge/merge_all_snTAPS_FL1.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+FINAL_SAMPLE=snTAPS-FL-1
+OUTDIR=${PROJECT}/08_qc_summary/final_single_sample
+TMPDIR=${OUTDIR}/tmp_merge_all
+
+cd "$PROJECT"
+
+mkdir -p "$OUTDIR" "$TMPDIR"
+
+echo "[INFO] start final technical merge: $(date)"
+
+echo "[INFO] check input files"
+for n in {1..8}
+do
+    group=snTAPS-FL-1_snTAPS-FL-1-${n}
+    merged=08_qc_summary/downstream_test/${group}/merged_full
+
+    for f in \
+        ${merged}/${group}.full_merged.summary.tsv \
+        ${merged}/${group}.full_merged.global_per_cb.tsv \
+        ${merged}/${group}.full_merged.bin_counts.tsv.gz
+    do
+        if [ ! -s "$f" ]; then
+            echo "[ERROR] missing input: $f"
+            exit 1
+        fi
+    done
+done
+
+echo "[INFO] merge bin_counts by CB and bin_id: $(date)"
+
+(
+    echo -e "CB\tbin_id\tmodified_calls\tcovered_calls\tmodified_rate"
+
+    for n in {1..8}
+    do
+        group=snTAPS-FL-1_snTAPS-FL-1-${n}
+        f=08_qc_summary/downstream_test/${group}/merged_full/${group}.full_merged.bin_counts.tsv.gz
+
+        zcat "$f" | awk '
+        BEGIN{FS=OFS="\t"}
+        NR==1{next}
+        {
+            print $1,$2,$3,$4
+        }'
+    done \
+    | sort -T "$TMPDIR" -S 60G --parallel=16 -k1,1 -k2,2 \
+    | awk '
+    BEGIN{FS=OFS="\t"}
+    {
+        key=$1"\t"$2
+        if (NR==1) {
+            prev=key
+            cb=$1
+            bin=$2
+            mod=$3
+            cov=$4
+        } else if (key==prev) {
+            mod+=$3
+            cov+=$4
+        } else {
+            rate=(cov>0 ? mod/cov : 0)
+            print cb,bin,mod,cov,sprintf("%.6f",rate)
+            prev=key
+            cb=$1
+            bin=$2
+            mod=$3
+            cov=$4
+        }
+    }
+    END{
+        if (NR>0) {
+            rate=(cov>0 ? mod/cov : 0)
+            print cb,bin,mod,cov,sprintf("%.6f",rate)
+        }
+    }'
+) | gzip -1 > ${OUTDIR}/${FINAL_SAMPLE}.all_technical_merged.bin_counts.tsv.gz
+
+echo "[INFO] merge reads_used per CB: $(date)"
+
+awk '
+BEGIN{FS=OFS="\t"}
+FNR==1{next}
+{
+    reads[$1]+=$2
+}
+END{
+    print "CB","reads_used"
+    for (cb in reads) print cb,reads[cb]
+}' \
+  08_qc_summary/downstream_test/snTAPS-FL-1_snTAPS-FL-1-{1..8}/merged_full/*.full_merged.global_per_cb.tsv \
+  | sort -k1,1 \
+  > ${TMPDIR}/${FINAL_SAMPLE}.reads_by_cb.tsv
+
+echo "[INFO] build global_per_cb from final merged bin_counts: $(date)"
+
+zcat ${OUTDIR}/${FINAL_SAMPLE}.all_technical_merged.bin_counts.tsv.gz \
+  | awk '
+  BEGIN{FS=OFS="\t"}
+  NR==1{next}
+  {
+      cb=$1
+      mod[cb]+=$3
+      cov[cb]+=$4
+      bins[cb]++
+  }
+  END{
+      print "CB","modified_calls","covered_calls","modified_rate","covered_bins"
+      for (cb in cov) {
+          rate=(cov[cb]>0 ? mod[cb]/cov[cb] : 0)
+          print cb,mod[cb],cov[cb],sprintf("%.6f",rate),bins[cb]
+      }
+  }' \
+  | sort -k1,1 \
+  > ${TMPDIR}/${FINAL_SAMPLE}.global_cov_by_cb.tsv
+
+awk '
+BEGIN{FS=OFS="\t"}
+NR==FNR{
+    if (FNR>1) reads[$1]=$2
+    next
+}
+FNR==1{
+    print "CB","reads_used","modified_calls","covered_calls","modified_rate","covered_bins"
+    next
+}
+{
+    cb=$1
+    r=(cb in reads ? reads[cb] : 0)
+    print cb,r,$2,$3,$4,$5
+}' \
+  ${TMPDIR}/${FINAL_SAMPLE}.reads_by_cb.tsv \
+  ${TMPDIR}/${FINAL_SAMPLE}.global_cov_by_cb.tsv \
+  > ${OUTDIR}/${FINAL_SAMPLE}.all_technical_merged.global_per_cb.tsv
+
+echo "[INFO] build final summary: $(date)"
+
+reads_used=$(awk 'NR>1{sum+=$2} END{print sum+0}' ${OUTDIR}/${FINAL_SAMPLE}.all_technical_merged.global_per_cb.tsv)
+cells=$(awk 'NR>1{n++} END{print n+0}' ${OUTDIR}/${FINAL_SAMPLE}.all_technical_merged.global_per_cb.tsv)
+total_mod=$(awk 'NR>1{sum+=$3} END{print sum+0}' ${OUTDIR}/${FINAL_SAMPLE}.all_technical_merged.global_per_cb.tsv)
+total_cov=$(awk 'NR>1{sum+=$4} END{print sum+0}' ${OUTDIR}/${FINAL_SAMPLE}.all_technical_merged.global_per_cb.tsv)
+rate=$(awk -v m="$total_mod" -v c="$total_cov" 'BEGIN{printf "%.6f", (c>0?m/c:0)}')
+
+{
+    echo -e "metric\tvalue"
+    echo -e "final_sample\t${FINAL_SAMPLE}"
+    echo -e "technical_groups\t8"
+    echo -e "reads_used\t${reads_used}"
+    echo -e "cells_with_covered_CpG\t${cells}"
+    echo -e "total_modified_calls\t${total_mod}"
+    echo -e "total_covered_calls\t${total_cov}"
+    echo -e "overall_modified_rate\t${rate}"
+} > ${OUTDIR}/${FINAL_SAMPLE}.all_technical_merged.summary.tsv
+
+rm -rf "$TMPDIR"
+
+echo "[INFO] done final merge: $(date)"

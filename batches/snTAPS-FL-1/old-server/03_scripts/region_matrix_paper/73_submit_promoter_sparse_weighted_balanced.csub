@@ -1,0 +1,52 @@
+#!/bin/bash
+#CSUB -J prom_sparse_bal
+#CSUB -q c02
+#CSUB -n 166 
+#CSUB -R 'span[hosts=1]'
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+#CSUB -o 09_logs/region_umap_paper/promoter_sparse_weighted_balanced.out
+#CSUB -e 09_logs/region_umap_paper/promoter_sparse_weighted_balanced.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+PY=/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python
+SCRIPT=03_scripts/region_matrix_paper/73_umap_promoter_sparse_weighted_residual.py
+
+OUTBASE=08_qc_summary/final_single_sample/region_umap_paper/promoter_sparse_weighted_balanced
+mkdir -p "$OUTBASE" 09_logs/region_umap_paper
+
+run_one () {
+  local n=$1
+  local minreg=$2
+  local topreg=$3
+
+  local REGION=08_qc_summary/final_single_sample/region_matrix_balanced_core/snTAPS-FL-1.balanced_core${n}.promoter_TSS_1.5kb.region_counts.tsv.gz
+  local QC=08_qc_summary/final_single_sample/cell_filter_balanced_core/snTAPS-FL-1.balanced_core${n}.global_per_cb.tsv
+  local OUT=$OUTBASE/balanced_core${n}_minRegion${minreg}_top${topreg}
+  local PREFIX=snTAPS-FL-1.promoter_sparse_balanced_core${n}_minRegion${minreg}_top${topreg}
+
+  mkdir -p "$OUT"
+
+  echo "[INFO] run balanced_core${n} min_region_cells=${minreg} top_regions=${topreg}"
+
+  $PY "$SCRIPT" \
+    --region-counts "$REGION" \
+    --cell-qc "$QC" \
+    --outdir "$OUT" \
+    --prefix "$PREFIX" \
+    --min-region-cells "$minreg" \
+    --n-top-regions "$topreg" \
+    --n-pcs 30 \
+    --n-clusters 4 \
+    --n-neighbors 30 \
+    --min-dist 0.3 \
+    --qc-regress reads_used,modified_rate \
+    --seed 1
+}
+
+# 两个主版本：一个保守，一个细胞更多
+run_one 5000 100 3000
+run_one 10000 200 3000
+
+echo "[INFO] done"

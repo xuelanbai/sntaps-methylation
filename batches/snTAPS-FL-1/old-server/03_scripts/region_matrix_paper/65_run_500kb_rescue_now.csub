@@ -1,0 +1,90 @@
+#!/bin/bash
+#CSUB -J bin500_rescue
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -R 'span[hosts=1]'
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+#CSUB -o 09_logs/region_umap_paper/bin500_rescue.out
+#CSUB -e 09_logs/region_umap_paper/bin500_rescue.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+PY=/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python
+
+MAKE=03_scripts/region_matrix_paper/64_make_500kb_bin_counts_from_100kb.py
+UMAP=03_scripts/34_umap_100kb_qcregress_fast.py
+
+BIN100=08_qc_summary/final_single_sample/snTAPS-FL-1.all_technical_merged.bin_counts.tsv.gz
+GENEBODY_LIST=08_qc_summary/final_single_sample/feature_bins/gene_body_100kb_bin_ids.txt
+
+OUTBIN=08_qc_summary/final_single_sample/bin_counts_500kb
+OUTUMAP=08_qc_summary/final_single_sample/region_umap_paper/bin500_rescue_now
+mkdir -p "$OUTBIN" "$OUTUMAP" 09_logs/region_umap_paper
+
+QC2=$(find 08_qc_summary/final_single_sample -type f -name "*expected_realcell_top2000*global_per_cb.tsv" | head -1)
+QC5=$(find 08_qc_summary/final_single_sample -type f -name "*expected_realcell_top5000*global_per_cb.tsv" | head -1)
+
+[ -n "$QC2" ] || QC2=08_qc_summary/final_single_sample/cell_filter_balanced_core/snTAPS-FL-1.balanced_core2000.global_per_cb.tsv
+[ -n "$QC5" ] || QC5=08_qc_summary/final_single_sample/cell_filter_balanced_core/snTAPS-FL-1.balanced_core5000.global_per_cb.tsv
+
+echo "[INFO] QC2=$QC2"
+echo "[INFO] QC5=$QC5"
+
+ALL500=$OUTBIN/snTAPS-FL-1.allgenome.500kb.bin_counts.tsv.gz
+GB500=$OUTBIN/snTAPS-FL-1.gene_body.500kb.bin_counts.tsv.gz
+
+if [ ! -s "$ALL500" ]; then
+  echo "[INFO] make allgenome 500kb bin counts"
+  $PY "$MAKE" \
+    --bin-counts "$BIN100" \
+    --out "$ALL500"
+fi
+
+if [ ! -s "$GB500" ]; then
+  echo "[INFO] make gene_body 500kb bin counts"
+  $PY "$MAKE" \
+    --bin-counts "$BIN100" \
+    --feature-bin-list "$GENEBODY_LIST" \
+    --out "$GB500"
+fi
+
+run_umap () {
+  local label=$1
+  local bcounts=$2
+  local qc=$3
+  local min_bin_cells=$4
+  local top_bins=$5
+
+  local odir="$OUTUMAP/$label"
+  mkdir -p "$odir"
+
+  echo "[INFO] run $label"
+
+  $PY "$UMAP" \
+    --global-qc "$qc" \
+    --bin-counts "$bcounts" \
+    --outdir "$odir" \
+    --prefix "snTAPS-FL-1.${label}" \
+    --mode seurat_norm \
+    --qc-keys reads_used,modified_rate \
+    --cellbin-min-cov 1 \
+    --min-bin-cells "$min_bin_cells" \
+    --top-variable-bins "$top_bins" \
+    --min-selected-bins 50 \
+    --n-pcs 30 \
+    --n-clusters 4 \
+    --n-neighbors 30 \
+    --min-dist 0.3 \
+    --n-components 2 \
+    --n-jobs 16 \
+    --seed 1
+}
+
+# 不铺太多，只做最关键四个
+run_umap all500_core2000_seurat_qcreg "$ALL500" "$QC2" 200 1500
+run_umap all500_core5000_seurat_qcreg "$ALL500" "$QC5" 500 1500
+run_umap geneBody500_core2000_seurat_qcreg "$GB500" "$QC2" 200 1500
+run_umap geneBody500_core5000_seurat_qcreg "$GB500" "$QC5" 500 1500
+
+echo "[INFO] done 500kb rescue"

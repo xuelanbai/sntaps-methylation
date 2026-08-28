@@ -1,0 +1,41 @@
+#!/bin/bash
+#CSUB -J qAB_gene_body_no_promoter100kb_seurat_depthMod
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -R 'span[hosts=1]'
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+#CSUB -o 09_logs/region_umap_paper/qcregress_AB/gene_body_no_promoter100kb_strict_qc_core_q25_q75_ge100k.core2000_seurat_depthMod.out
+#CSUB -e 09_logs/region_umap_paper/qcregress_AB/gene_body_no_promoter100kb_strict_qc_core_q25_q75_ge100k.core2000_seurat_depthMod.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+echo "[INFO] start $(date)"
+echo "[INFO] qc=08_qc_summary/final_single_sample/cell_filter_strict_qc_core/snTAPS-FL-1.strict_qc_core_q25_q75_ge100k.core2000.global_per_cb.tsv"
+echo "[INFO] feature=gene_body_no_promoter100kb"
+echo "[INFO] route=seurat_depthMod"
+echo "[INFO] mode=seurat_norm"
+echo "[INFO] qc_keys=reads_used,modified_rate"
+echo "[INFO] min_bin_cells=60"
+
+/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python 03_scripts/34_umap_100kb_qcregress_fast.py \
+  --global-qc "08_qc_summary/final_single_sample/cell_filter_strict_qc_core/snTAPS-FL-1.strict_qc_core_q25_q75_ge100k.core2000.global_per_cb.tsv" \
+  --bin-counts "08_qc_summary/final_single_sample/snTAPS-FL-1.all_technical_merged.bin_counts.tsv.gz" \
+  --outdir "08_qc_summary/final_single_sample/region_umap_paper/100kb_qcregress_AB/gene_body_no_promoter100kb_strict_qc_core_q25_q75_ge100k.core2000_seurat_depthMod" \
+  --prefix "snTAPS-FL-1.gene_body_no_promoter100kb_strict_qc_core_q25_q75_ge100k.core2000_seurat_depthMod" \
+  --mode "seurat_norm" \
+  --feature-bin-list 08_qc_summary/final_single_sample/feature_bins/gene_body_no_promoter_100kb_bin_ids.txt \
+  --cellbin-min-cov 1 \
+  --min-bin-cells 60 \
+  --top-variable-bins 3000 \
+  --min-selected-bins 10 \
+  --n-pcs 30 \
+  --n-clusters 8 \
+  --n-neighbors 30 \
+  --min-dist 0.3 \
+  --n-components 2 \
+  --n-jobs 16 \
+  --seed 1 \
+  --qc-keys "reads_used,modified_rate"
+
+echo "[INFO] done $(date)"

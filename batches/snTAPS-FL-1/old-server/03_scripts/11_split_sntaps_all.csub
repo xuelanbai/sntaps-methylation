@@ -1,0 +1,59 @@
+#!/bin/bash
+#CSUB -J snTAPS_split
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -o 09_logs/snTAPS_split.out
+#CSUB -e 09_logs/snTAPS_split.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+PAIR_TABLE=${PROJECT}/08_qc_summary/split_pair_table.tsv
+
+cd "$PROJECT"
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_qc
+
+mkdir -p 04_fastq_split/split_by_lane
+mkdir -p 08_qc_summary/split_stats
+mkdir -p 09_logs/split
+
+run_one() {
+    sample="$1"
+    lane="$2"
+    r1="$3"
+    r2="$4"
+
+    outdir="${PROJECT}/04_fastq_split/split_by_lane/${sample}"
+    statdir="${PROJECT}/08_qc_summary/split_stats/${sample}"
+
+    mkdir -p "$outdir" "$statdir"
+
+    log="${PROJECT}/09_logs/split/${sample}_${lane}.split.log"
+
+    echo "[INFO] start ${sample} ${lane}: $(date)" > "$log"
+
+    python3 ${PROJECT}/03_scripts/09_split_sntaps_fastq.py \
+      --r1 "$r1" \
+      --r2 "$r2" \
+      --out-r1 "${outdir}/${sample}_${lane}.split_R1.fq.gz" \
+      --out-r2 "${outdir}/${sample}_${lane}.split_R2.fq.gz" \
+      --t5 ${PROJECT}/03_scripts/split/index/T5 \
+      --t7 ${PROJECT}/03_scripts/split/index/T7 \
+      --i5 ${PROJECT}/03_scripts/split/index/I5 \
+      --i7 ${PROJECT}/03_scripts/split/index/I7 \
+      --trim-left 30 \
+      --stat "${statdir}/${sample}_${lane}.split.stat.tsv" \
+      --bc-count "${statdir}/${sample}_${lane}.barcode_count.tsv" \
+      >> "$log" 2>&1
+
+    echo "[INFO] done ${sample} ${lane}: $(date)" >> "$log"
+}
+
+export -f run_one
+export PROJECT
+
+tail -n +2 "$PAIR_TABLE" | xargs -P 4 -n 4 bash -c 'run_one "$@"' _
+
+echo "[INFO] all split finished: $(date)"

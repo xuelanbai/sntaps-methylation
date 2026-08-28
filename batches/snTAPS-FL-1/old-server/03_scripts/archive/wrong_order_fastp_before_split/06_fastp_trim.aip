@@ -1,0 +1,64 @@
+#!/bin/bash
+#CSUB -J snTAPS_fastp
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -o 09_logs/snTAPS_fastp.out
+#CSUB -e 09_logs/snTAPS_fastp.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+PAIR_TABLE=${PROJECT}/08_qc_summary/fastp_pair_table.tsv
+OUTROOT=${PROJECT}/05_trim/fastp
+
+cd "${PROJECT}"
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_qc
+
+mkdir -p "${OUTROOT}" "${PROJECT}/09_logs" "${PROJECT}/09_logs/fastp"
+
+echo "[INFO] fastp path:"
+which fastp
+fastp --version
+
+run_fastp_one_pair() {
+    sample="$1"
+    lane="$2"
+    r1="$3"
+    r2="$4"
+
+    outdir="${OUTROOT}/${sample}"
+    mkdir -p "${outdir}"
+
+    out1="${outdir}/${sample}_${lane}_R1.fastp.fq.gz"
+    out2="${outdir}/${sample}_${lane}_R2.fastp.fq.gz"
+    html="${outdir}/${sample}_${lane}.fastp.html"
+    json="${outdir}/${sample}_${lane}.fastp.json"
+    log="${PROJECT}/09_logs/fastp/${sample}_${lane}.fastp.log"
+
+    echo "[INFO] ${sample} ${lane} start: $(date)" > "${log}"
+
+    fastp \
+      -i "${r1}" \
+      -I "${r2}" \
+      -o "${out1}" \
+      -O "${out2}" \
+      --detect_adapter_for_pe \
+      --qualified_quality_phred 20 \
+      --length_required 30 \
+      --thread 4 \
+      --html "${html}" \
+      --json "${json}" \
+      >> "${log}" 2>&1
+
+    echo "[INFO] ${sample} ${lane} done: $(date)" >> "${log}"
+}
+
+export -f run_fastp_one_pair
+export PROJECT OUTROOT
+
+tail -n +2 "${PAIR_TABLE}" | \
+  xargs -P 4 -n 4 bash -c 'run_fastp_one_pair "$@"' _
+
+echo "[INFO] all fastp finished: $(date)"

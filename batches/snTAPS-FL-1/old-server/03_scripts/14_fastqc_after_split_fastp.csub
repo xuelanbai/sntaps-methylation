@@ -1,0 +1,27 @@
+#!/bin/bash
+#CSUB -J snTAPS_fastqc_trim
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -o 09_logs/snTAPS_fastqc_after_split_fastp.out
+#CSUB -e 09_logs/snTAPS_fastqc_after_split_fastp.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+cd "$PROJECT"
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_qc
+
+OUTDIR=${PROJECT}/04_fastqc/after_split_fastp
+mkdir -p "$OUTDIR" 09_logs
+
+find 05_fastp/after_split -name "*.fastp_R*.fq.gz" | sort > "$OUTDIR/fastp_fastq.list"
+
+echo "[INFO] fastq number:"
+wc -l "$OUTDIR/fastp_fastq.list"
+
+cat "$OUTDIR/fastp_fastq.list" | xargs -n 1 -P 16 fastqc -t 1 -o "$OUTDIR"
+
+echo "[INFO] FastQC after split+fastp finished: $(date)"

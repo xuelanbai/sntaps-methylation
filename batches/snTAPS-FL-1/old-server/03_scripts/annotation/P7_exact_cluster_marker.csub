@@ -1,0 +1,15 @@
+#!/bin/bash
+#CSUB -J P7_marker
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -o 09_logs/annotation/P7_exact_cluster_marker.out
+#CSUB -e 09_logs/annotation/P7_exact_cluster_marker.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/annotation/P7_exact_cluster_marker.py

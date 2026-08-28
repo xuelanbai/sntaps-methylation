@@ -1,0 +1,28 @@
+#!/bin/bash
+#CSUB -J umap_qc_full_p
+#CSUB -q c02
+#CSUB -n 64
+#CSUB -o 09_logs/umap_qc_full_parallel/umap_qc_full_parallel.out
+#CSUB -e 09_logs/umap_qc_full_parallel/umap_qc_full_parallel.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/30_umap_from_final_bins_firstpass.parallel.py \
+  --global-qc 08_qc_summary/final_single_sample/snTAPS-FL-1.all_technical_merged.global_per_cb.tsv \
+  --bin-counts 08_qc_summary/final_single_sample/snTAPS-FL-1.all_technical_merged.bin_counts.tsv.gz \
+  --outdir 08_qc_summary/final_single_sample/umap_qc_full_parallel \
+  --prefix snTAPS-FL-1.qc_full \
+  --min-reads 20000 \
+  --min-covered-calls 50000 \
+  --min-covered-bins 2000 \
+  --cellbin-min-cov 5 \
+  --max-cells 300000 \
+  --min-bin-cells 1000 \
+  --top-variable-bins 2000 \
+  --n-pcs 30 \
+  --n-clusters 10

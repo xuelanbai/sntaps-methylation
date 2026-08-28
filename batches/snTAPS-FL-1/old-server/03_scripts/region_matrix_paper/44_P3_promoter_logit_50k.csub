@@ -1,0 +1,29 @@
+#!/bin/bash
+#CSUB -J P3_prom_logit
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -o 09_logs/region_umap_paper/P3_promoter_logit_50k.out
+#CSUB -e 09_logs/region_umap_paper/P3_promoter_logit_50k.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+python3 03_scripts/region_matrix_paper/44_umap_region_matrix_paper_fast.py \
+  --region-counts 08_qc_summary/final_single_sample/region_matrix/snTAPS-FL-1.strict2.promoter_TSS_1.5kb.region_counts.tsv.gz \
+  --global-qc 08_qc_summary/final_single_sample/region_matrix/strict2_cells.global_qc.tsv \
+  --outdir 08_qc_summary/final_single_sample/region_umap_paper/P3_promoter_logit_50k \
+  --prefix snTAPS-FL-1.P3_promoter_logit_50k \
+  --mode logit_rate \
+  --max-cells 50000 \
+  --min-cell-regions 500 \
+  --min-region-cells 500 \
+  --top-variable-regions 2000 \
+  --regress-qc \
+  --n-pcs 30 \
+  --n-neighbors 30 \
+  --min-dist 0.15 \
+  --n-clusters 8 \
+  --n-jobs 16

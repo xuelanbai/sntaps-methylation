@@ -1,0 +1,41 @@
+#!/bin/bash
+#CSUB -J taps_1_1_2M
+#CSUB -q c02
+#CSUB -n 4
+#CSUB -o 09_logs/taps_1_1_2M.out
+#CSUB -e 09_logs/taps_1_1_2M.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+SAMPLE=snTAPS-FL-1_snTAPS-FL-1-1
+OUTDIR=${PROJECT}/08_qc_summary/downstream_test/${SAMPLE}
+
+cd "$PROJECT"
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_analysis
+
+mkdir -p "$OUTDIR" 09_logs
+
+echo "[INFO] start: $(date)"
+echo "[INFO] sample: $SAMPLE"
+
+echo "[INFO] bam list:"
+cat ${OUTDIR}/${SAMPLE}.bam.list
+
+echo "[INFO] whitelist count:"
+wc -l ${OUTDIR}/${SAMPLE}.CB.whitelist.readpairs_ge1000.txt
+
+python3 03_scripts/20_call_taps_cpg_bins_by_cb.py \
+  --bam-list ${OUTDIR}/${SAMPLE}.bam.list \
+  --fasta 02_reference/pig/genome.fa \
+  --bins 02_reference/pig/cpg_bins/pig_100kb_bins.cpg20.bed \
+  --whitelist ${OUTDIR}/${SAMPLE}.CB.whitelist.readpairs_ge1000.txt \
+  --out-prefix ${OUTDIR}/${SAMPLE}.test2M \
+  --min-mapq 30 \
+  --min-baseq 20 \
+  --max-reads 2000000 \
+  2> ${OUTDIR}/${SAMPLE}.test2M.call.log
+
+echo "[INFO] done: $(date)"

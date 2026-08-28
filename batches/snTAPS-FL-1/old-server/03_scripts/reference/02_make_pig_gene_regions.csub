@@ -1,0 +1,24 @@
+#!/bin/bash
+#CSUB -J pig_gene_regions
+#CSUB -q c02
+#CSUB -n 2
+#CSUB -o 09_logs/reference/pig_gene_regions.out
+#CSUB -e 09_logs/reference/pig_gene_regions.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+cd "$PROJECT"
+
+mkdir -p 02_reference/pig/gene_regions
+mkdir -p 09_logs/reference
+
+python3 03_scripts/reference/02_make_pig_gene_regions.py \
+  --gtf 02_reference/pig/genes.gtf.gz \
+  --chrom-sizes 02_reference/pig/pig.primary.chrom.sizes \
+  --outdir 02_reference/pig/gene_regions \
+  --promoter-up 1500 \
+  --promoter-down 1500
+
+echo "[INFO] done at $(date)"

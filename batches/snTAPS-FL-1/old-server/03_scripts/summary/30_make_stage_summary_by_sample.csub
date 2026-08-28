@@ -1,0 +1,32 @@
+#!/bin/bash
+#CSUB -J stage_summary
+#CSUB -q c02
+#CSUB -n 8
+#CSUB -o 09_logs/stage_summary/stage_summary.out
+#CSUB -e 09_logs/stage_summary/stage_summary.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate foodie_env
+
+echo "[INFO] start stage summary: $(date)"
+echo "[INFO] python:"
+which python3
+python3 --version
+
+echo "[INFO] samtools:"
+which samtools
+samtools --version | head -3
+
+python3 03_scripts/summary/30_make_stage_summary_by_sample.py
+
+echo "[INFO] output:"
+ls -lh 08_qc_summary/stage_summary/
+
+echo "[INFO] preview:"
+column -t 08_qc_summary/stage_summary/snTAPS_stage_summary_simple.tsv || true
+
+echo "[INFO] done stage summary: $(date)"

@@ -1,0 +1,15 @@
+#!/bin/bash
+#CSUB -J P7_modMark
+#CSUB -q c02
+#CSUB -n 4
+#CSUB -R "span[hosts=1]"
+#CSUB -o 09_logs/annotation/P7_module_marker.out
+#CSUB -e 09_logs/annotation/P7_module_marker.err
+
+set -eo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+mkdir -p 09_logs/annotation
+
+PY=/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python3
+$PY 03_scripts/annotation/87_P7_pig_frontal_marker_module_score.py

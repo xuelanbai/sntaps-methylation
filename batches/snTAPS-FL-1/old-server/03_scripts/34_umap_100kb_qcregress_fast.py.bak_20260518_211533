@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+import argparse
+import gzip
+from pathlib import Path
+from collections import defaultdict
+
+import numpy as np
+import pandas as pd
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+import umap
+
+
+def read_header(path):
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt") as f:
+        return f.readline().rstrip("\n").split("\t")
+
+
+def pick_col(cols, candidates, required=True):
+    for c in candidates:
+        if c in cols:
+            return c
+    if required:
+        raise ValueError(f"Cannot find columns from {candidates}. Existing columns: {cols}")
+    return None
+
+
+def load_feature_bins(path):
+    if path is None:
+        return None
+    s = set()
+    with open(path) as f:
+        for line in f:
+            x = line.strip().split("\t")[0]
+            if x:
+                s.add(str(x))
+    return s
+
+
+def make_value(df, mode, cb_col, mod_col, cov_col, rate_col, qc_rate_map):
+    if rate_col is not None:
+        v = pd.to_numeric(df[rate_col], errors="coerce").astype(float).to_numpy()
+    else:
+        mod = pd.to_numeric(df[mod_col], errors="coerce").astype(float).to_numpy()
+        cov = pd.to_numeric(df[cov_col], errors="coerce").astype(float).to_numpy()
+        v = np.divide(mod, cov, out=np.zeros_like(mod, dtype=float), where=cov > 0)
+
+    if mode == "raw":
+        return v
+
+    if mode == "residual":
+        cell_rate = df[cb_col].map(qc_rate_map).astype(float).to_numpy()
+        return v - cell_rate
+
+    if mode == "seurat_norm":
+        mod = pd.to_numeric(df[mod_col], errors="coerce").astype(float).to_numpy()
+        cov = pd.to_numeric(df[cov_col], errors="coerce").astype(float).to_numpy()
+        return np.log1p(mod) - np.log1p(cov)
+
+    raise ValueError(mode)
+
+
+def add_to_agg(agg_n, agg_s, agg_ss, bins, vals):
+    tmp = pd.DataFrame({"bin": bins.astype(str), "v": vals})
+    tmp = tmp.replace([np.inf, -np.inf], np.nan).dropna()
+    if tmp.empty:
+        return
+    tmp["v2"] = tmp["v"] * tmp["v"]
+    g = tmp.groupby("bin", sort=False).agg(n=("v", "size"), s=("v", "sum"), ss=("v2", "sum"))
+    for b, row in g.iterrows():
+        agg_n[b] += int(row["n"])
+        agg_s[b] += float(row["s"])
+        agg_ss[b] += float(row["ss"])
+
+
+def plot_umap(res, outdir, prefix, color_col, is_cluster=False):
+    if color_col not in res.columns:
+        return
+    plt.figure(figsize=(7, 6))
+    if is_cluster:
+        sc = plt.scatter(
+            res["UMAP1"], res["UMAP2"],
+            c=res[color_col].astype(int),
+            s=2, alpha=0.8
+        )
+        plt.colorbar(sc, label=color_col)
+    else:
+        vals = pd.to_numeric(res[color_col], errors="coerce")
+        sc = plt.scatter(
+            res["UMAP1"], res["UMAP2"],
+            c=vals,
+            s=2, alpha=0.8
+        )
+        plt.colorbar(sc, label=color_col)
+    plt.xlabel("UMAP1")
+    plt.ylabel("UMAP2")
+    plt.title(f"{prefix} colored by {color_col}")
+    plt.tight_layout()
+    plt.savefig(outdir / f"{prefix}.umap_by_{color_col}.png", dpi=300)
+    plt.close()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--global-qc", required=True)
+    ap.add_argument("--bin-counts", required=True)
+    ap.add_argument("--outdir", required=True)
+    ap.add_argument("--prefix", required=True)
+
+    ap.add_argument("--mode", choices=["raw", "residual", "seurat_norm"], default="residual")
+    ap.add_argument("--feature-bin-list", default=None)
+
+    ap.add_argument("--cellbin-min-cov", type=int, default=1)
+    ap.add_argument("--min-bin-cells", type=int, default=100)
+    ap.add_argument("--top-variable-bins", type=int, default=3000)
+    ap.add_argument("--min-selected-bins", type=int, default=10)
+
+    ap.add_argument("--n-pcs", type=int, default=30)
+    ap.add_argument("--n-clusters", type=int, default=8)
+    ap.add_argument("--n-neighbors", type=int, default=30)
+    ap.add_argument("--min-dist", type=float, default=0.3)
+    ap.add_argument("--n-components", type=int, default=2)
+    ap.add_argument("--n-jobs", type=int, default=16)
+    ap.add_argument("--seed", type=int, default=1)
+
+    ap.add_argument(
+        "--qc-keys",
+        default="reads_used,covered_bins,modified_rate",
+        help="QC variables to regress out. Default: reads_used,covered_bins,modified_rate"
+    )
+
+    ap.add_argument("--chunksize", type=int, default=2000000)
+
+    args = ap.parse_args()
+
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    print("[INFO] read global QC", flush=True)
+    qc = pd.read_csv(args.global_qc, sep="\t")
+    if "CB" not in qc.columns:
+        qc = qc.rename(columns={qc.columns[0]: "CB"})
+
+    qc["CB"] = qc["CB"].astype(str)
+    qc = qc.drop_duplicates("CB").reset_index(drop=True)
+    cells = qc["CB"].tolist()
+    cell_set = set(cells)
+
+    print(f"[INFO] input cells: {len(cells)}", flush=True)
+
+    if "modified_rate" not in qc.columns:
+        if "modified_calls" in qc.columns and "covered_calls" in qc.columns:
+            qc["modified_rate"] = qc["modified_calls"] / qc["covered_calls"].replace(0, np.nan)
+            qc["modified_rate"] = qc["modified_rate"].fillna(0)
+        else:
+            raise ValueError("modified_rate not found in QC table")
+
+    qc_rate_map = dict(zip(qc["CB"], qc["modified_rate"]))
+
+    feature_bins = load_feature_bins(args.feature_bin_list)
+    if feature_bins is None:
+        print("[INFO] feature bins: all 100kb bins", flush=True)
+    else:
+        print(f"[INFO] feature bins loaded: {len(feature_bins)}", flush=True)
+
+    cols = read_header(args.bin_counts)
+    print(f"[INFO] bin-count columns: {cols}", flush=True)
+
+    cb_col = pick_col(cols, ["CB", "cell", "cell_id", "barcode", "cell_barcode"])
+    bin_col = pick_col(cols, ["bin_id", "region_id", "region", "bin"])
+    mod_col = pick_col(cols, ["modified_calls", "meth_calls", "methylated_calls", "mod_calls"], required=False)
+    cov_col = pick_col(cols, ["covered_calls", "total_calls", "coverage", "cov"], required=True)
+    rate_col = pick_col(cols, ["modified_rate", "meth_rate", "methylation_rate", "rate"], required=False)
+
+    usecols = [cb_col, bin_col, cov_col]
+    if mod_col is not None and mod_col not in usecols:
+        usecols.append(mod_col)
+    if rate_col is not None and rate_col not in usecols:
+        usecols.append(rate_col)
+
+    print("[INFO] first pass: select variable bins", flush=True)
+    agg_n = defaultdict(int)
+    agg_s = defaultdict(float)
+    agg_ss = defaultdict(float)
+
+    reader = pd.read_csv(
+        args.bin_counts,
+        sep="\t",
+        usecols=usecols,
+        chunksize=args.chunksize
+    )
+
+    total_rows = 0
+    kept_rows = 0
+    for i, chunk in enumerate(reader, 1):
+        total_rows += len(chunk)
+        chunk[cb_col] = chunk[cb_col].astype(str)
+        chunk[bin_col] = chunk[bin_col].astype(str)
+
+        m = chunk[cb_col].isin(cell_set)
+        if feature_bins is not None:
+            m &= chunk[bin_col].isin(feature_bins)
+        m &= pd.to_numeric(chunk[cov_col], errors="coerce").fillna(0).ge(args.cellbin_min_cov)
+
+        chunk = chunk.loc[m]
+        kept_rows += len(chunk)
+
+        if not chunk.empty:
+            vals = make_value(chunk, args.mode, cb_col, mod_col, cov_col, rate_col, qc_rate_map)
+            add_to_agg(agg_n, agg_s, agg_ss, chunk[bin_col], vals)
+
+        if i % 10 == 0:
+            print(f"[INFO] chunk {i}; total rows={total_rows}; kept={kept_rows}; bins={len(agg_n)}", flush=True)
+
+    print(f"[INFO] first pass done. total rows={total_rows}; kept rows={kept_rows}; bins={len(agg_n)}", flush=True)
+
+    rows = []
+    for b in agg_n:
+        n = agg_n[b]
+        if n < args.min_bin_cells:
+            continue
+        mean = agg_s[b] / n
+        var = agg_ss[b] / n - mean * mean
+        rows.append((b, n, mean, var))
+
+    if len(rows) == 0:
+        raise ValueError("No bins left after min-bin-cells filter")
+
+    bin_stat = pd.DataFrame(rows, columns=["bin_id", "n_cells", "mean", "var"])
+    bin_stat = bin_stat.sort_values("var", ascending=False)
+    selected = bin_stat.head(args.top_variable_bins)["bin_id"].astype(str).tolist()
+    selected_set = set(selected)
+
+    print(f"[INFO] selected bins: {len(selected)}", flush=True)
+
+    bin_stat.to_csv(outdir / f"{args.prefix}.bin_variance.tsv", sep="\t", index=False)
+    pd.Series(selected, name="bin_id").to_csv(outdir / f"{args.prefix}.selected_bins.tsv", sep="\t", index=False)
+
+    print("[INFO] second pass: build dense selected matrix", flush=True)
+
+    cell_index = {c: i for i, c in enumerate(cells)}
+    bin_index = {b: i for i, b in enumerate(selected)}
+
+    X = np.full((len(cells), len(selected)), np.nan, dtype=np.float32)
+    covered_selected = np.zeros(len(cells), dtype=np.int32)
+
+    reader = pd.read_csv(
+        args.bin_counts,
+        sep="\t",
+        usecols=usecols,
+        chunksize=args.chunksize
+    )
+
+    for i, chunk in enumerate(reader, 1):
+        chunk[cb_col] = chunk[cb_col].astype(str)
+        chunk[bin_col] = chunk[bin_col].astype(str)
+
+        m = chunk[cb_col].isin(cell_set)
+        m &= chunk[bin_col].isin(selected_set)
+        m &= pd.to_numeric(chunk[cov_col], errors="coerce").fillna(0).ge(args.cellbin_min_cov)
+
+        chunk = chunk.loc[m]
+        if chunk.empty:
+            continue
+
+        vals = make_value(chunk, args.mode, cb_col, mod_col, cov_col, rate_col, qc_rate_map)
+
+        ci = chunk[cb_col].map(cell_index).to_numpy()
+        bi = chunk[bin_col].map(bin_index).to_numpy()
+
+        X[ci, bi] = vals.astype(np.float32)
+        np.add.at(covered_selected, ci, 1)
+
+        if i % 10 == 0:
+            print(f"[INFO] second pass chunk {i}", flush=True)
+
+    qc["covered_selected_bins"] = covered_selected
+    keep_cell = covered_selected >= args.min_selected_bins
+
+    print(f"[INFO] cells before selected-bin filter: {len(qc)}", flush=True)
+    print(f"[INFO] cells after selected-bin filter: {int(keep_cell.sum())}", flush=True)
+
+    if keep_cell.sum() < 100:
+        raise ValueError("Too few cells left after selected-bin filter")
+
+    qc = qc.loc[keep_cell].reset_index(drop=True)
+    X = X[keep_cell, :]
+
+    good_cols = ~np.all(np.isnan(X), axis=0)
+    X = X[:, good_cols]
+    selected2 = np.array(selected, dtype=object)[good_cols]
+    print(f"[INFO] bins after non-empty filter: {X.shape[1]}", flush=True)
+
+    col_mean = np.nanmean(X, axis=0)
+    inds = np.where(np.isnan(X))
+    X[inds] = np.take(col_mean, inds[1])
+
+    print("[INFO] scale matrix", flush=True)
+    X = StandardScaler(with_mean=True, with_std=True).fit_transform(X).astype(np.float32)
+
+    qc_keys = [x.strip() for x in args.qc_keys.split(",") if x.strip()]
+    qc_keys = [x for x in qc_keys if x in qc.columns]
+
+    print(f"[INFO] QC regress keys: {qc_keys}", flush=True)
+    if len(qc_keys) > 0:
+        Z = qc[qc_keys].copy()
+        for c in qc_keys:
+            Z[c] = pd.to_numeric(Z[c], errors="coerce").fillna(Z[c].median())
+            if Z[c].max() > 10:
+                Z[c] = np.log10(Z[c] + 1)
+        Z = Z.to_numpy(dtype=np.float64)
+        Z = StandardScaler(with_mean=True, with_std=True).fit_transform(Z)
+        design = np.column_stack([np.ones(Z.shape[0]), Z])
+        beta = np.linalg.lstsq(design, X, rcond=None)[0]
+        fitted_qc = design[:, 1:] @ beta[1:, :]
+        X = (X - fitted_qc).astype(np.float32)
+
+    n_pcs = min(args.n_pcs, X.shape[0] - 1, X.shape[1] - 1)
+    if n_pcs < 2:
+        raise ValueError(f"Too few dimensions for PCA: X={X.shape}")
+
+    print(f"[INFO] PCA n_pcs={n_pcs}", flush=True)
+    pcs = PCA(n_components=n_pcs, random_state=args.seed, svd_solver="randomized").fit_transform(X)
+
+    print("[INFO] UMAP", flush=True)
+    emb = umap.UMAP(
+        n_neighbors=args.n_neighbors,
+        min_dist=args.min_dist,
+        metric="euclidean",
+        n_components=args.n_components,
+        random_state=args.seed,
+        n_jobs=args.n_jobs
+    ).fit_transform(pcs)
+
+    print("[INFO] KMeans clustering", flush=True)
+    cluster = KMeans(n_clusters=args.n_clusters, random_state=args.seed, n_init=20).fit_predict(pcs)
+
+    res = qc.copy()
+    res["UMAP1"] = emb[:, 0]
+    res["UMAP2"] = emb[:, 1]
+    if args.n_components >= 3:
+        res["UMAP3"] = emb[:, 2]
+    res["cluster"] = cluster
+
+    res.to_csv(outdir / f"{args.prefix}.umap.tsv", sep="\t", index=False)
+    pd.Series(selected2, name="bin_id").to_csv(outdir / f"{args.prefix}.selected_bins.final.tsv", sep="\t", index=False)
+
+    res["cluster"].value_counts().sort_index().to_csv(
+        outdir / f"{args.prefix}.cluster_counts.tsv",
+        sep="\t",
+        header=["n_cells"]
+    )
+
+    num_cols = [c for c in ["UMAP1", "UMAP2", "UMAP3", "reads_used", "covered_calls", "covered_bins", "modified_rate", "covered_selected_bins"] if c in res.columns]
+    res[num_cols].corr(method="spearman").to_csv(
+        outdir / f"{args.prefix}.umap_qc_spearman_corr.tsv",
+        sep="\t"
+    )
+
+    plot_umap(res, outdir, args.prefix, "cluster", is_cluster=True)
+    for c in ["reads_used", "covered_calls", "covered_bins", "modified_rate", "covered_selected_bins"]:
+        plot_umap(res, outdir, args.prefix, c, is_cluster=False)
+
+    if args.n_components >= 3:
+        try:
+            import plotly.express as px
+            fig = px.scatter_3d(
+                res,
+                x="UMAP1",
+                y="UMAP2",
+                z="UMAP3",
+                color=res["cluster"].astype(str),
+                hover_data=["CB"] if "CB" in res.columns else None,
+                opacity=0.75
+            )
+            fig.write_html(outdir / f"{args.prefix}.umap3d_cluster.html")
+        except Exception as e:
+            print(f"[WARN] plotly 3D html failed: {e}", flush=True)
+
+    print("[INFO] done", flush=True)
+
+
+if __name__ == "__main__":
+    main()

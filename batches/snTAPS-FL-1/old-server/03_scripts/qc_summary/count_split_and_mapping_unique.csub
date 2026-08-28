@@ -1,0 +1,236 @@
+#!/bin/bash
+#CSUB -J qc_split_map
+#CSUB -q c02
+#CSUB -n 8
+#CSUB -o logs/qc_read_stats/qc_split_map.out
+#CSUB -e logs/qc_read_stats/qc_split_map.err
+
+set -euo pipefail
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+THREADS=8
+OUT=08_qc_summary/final_single_sample/qc_read_stats
+mkdir -p "$OUT"
+
+SPLIT_TSV=${OUT}/split_reads_by_lane.tsv
+MAP_TSV=${OUT}/mapping_unique_by_lane.tsv
+MERGED_TSV=${OUT}/split_mapping_unique_by_lane.tsv
+FGROUP_TSV=${OUT}/split_mapping_unique_by_Fgroup.tsv
+TOTAL_TSV=${OUT}/split_mapping_unique_total.tsv
+
+echo "[INFO] start: $(date)"
+echo "[INFO] output: $OUT"
+
+# ---------- 1. 找拆分后的R1 fastq ----------
+# 这里优先找04_fastq_split，其次05_fastp；如果你们实际拆分输出目录不同，只需要改这里
+FQ_ROOTS=()
+for d in 04_fastq_split 05_fastp; do
+    if [ -d "$d" ]; then
+        FQ_ROOTS+=("$d")
+    fi
+done
+
+: > ${OUT}/candidate_R1_fastq.list
+if [ ${#FQ_ROOTS[@]} -gt 0 ]; then
+    find "${FQ_ROOTS[@]}" -type f \( -name "*.fq.gz" -o -name "*.fastq.gz" \) \
+        | grep -Ei 'R1|_1\.f|read1' \
+        | sort > ${OUT}/candidate_R1_fastq.list || true
+fi
+
+echo -e "sample\tF_group\tlane\tsplit_R1_reads\tfastq_file" > "$SPLIT_TSV"
+
+count_fastq_reads() {
+    fq="$1"
+    if command -v seqkit >/dev/null 2>&1; then
+        seqkit stats -T "$fq" 2>/dev/null | awk 'NR==2{gsub(/,/,"",$4); print $4}'
+    else
+        gzip -cd "$fq" | awk 'END{print NR/4}'
+    fi
+}
+
+for n in 1 2 3 4 5 6 7 8
+do
+    sample="snTAPS-FL-1_snTAPS-FL-1-${n}"
+    Fgroup="F${n}"
+
+    for lane in L1 L2 L3 L4 L5 L6 L7 L8
+    do
+        fq=$(grep "$sample" ${OUT}/candidate_R1_fastq.list | grep "$lane" | head -1 || true)
+
+        if [ -n "$fq" ] && [ -s "$fq" ]; then
+            reads=$(count_fastq_reads "$fq")
+        else
+            reads="NA"
+            fq="NA"
+        fi
+
+        echo -e "${sample}\t${Fgroup}\t${lane}\t${reads}\t${fq}" >> "$SPLIT_TSV"
+    done
+done
+
+# ---------- 2. mapping后unique reads ----------
+# 优先解析Bismark report；找不到report时，再用BAM粗略统计primary mapped/MAPQ>=1 reads
+
+echo -e "sample\tF_group\tlane\tbismark_total_pairs\tbismark_unique_pairs\tunique_mapped_reads_from_report\tbam_primary_mapped_reads\tbam_mapq1_primary_mapped_reads\tbam_file\treport_file" > "$MAP_TSV"
+
+parse_report_value() {
+    rep="$1"
+    key="$2"
+    python3 - "$rep" "$key" <<'PY'
+import re, sys
+rep, key = sys.argv[1], sys.argv[2]
+txt = open(rep, errors="ignore").read()
+
+patterns = {
+    "total_pairs": [
+        r"Sequence pairs analysed in total:\s*([\d,]+)",
+        r"Sequences analysed in total:\s*([\d,]+)",
+    ],
+    "unique_pairs": [
+        r"Number of paired-end alignments with a unique best hit:\s*([\d,]+)",
+        r"Number of alignments with a unique best hit.*?:\s*([\d,]+)",
+        r"unique best hit.*?:\s*([\d,]+)",
+    ],
+}
+
+val = "NA"
+for p in patterns.get(key, []):
+    m = re.search(p, txt, flags=re.I)
+    if m:
+        val = m.group(1).replace(",", "")
+        break
+print(val)
+PY
+}
+
+for n in 1 2 3 4 5 6 7 8
+do
+    sample="snTAPS-FL-1_snTAPS-FL-1-${n}"
+    Fgroup="F${n}"
+
+    for lane in L1 L2 L3 L4 L5 L6 L7 L8
+    do
+        bam="06_align/bam_by_lane/${sample}/${sample}_${lane}.sorted.bam"
+
+        rep=$(find 06_align -type f \( -name "*${sample}*${lane}*report*.txt" -o -name "*${sample}*${lane}*bismark*.txt" \) 2>/dev/null | head -1 || true)
+
+        total_pairs="NA"
+        unique_pairs="NA"
+        unique_reads_report="NA"
+        primary_mapped="NA"
+        mapq1_primary="NA"
+
+        if [ -n "$rep" ] && [ -s "$rep" ]; then
+            total_pairs=$(parse_report_value "$rep" total_pairs)
+            unique_pairs=$(parse_report_value "$rep" unique_pairs)
+
+            if [[ "$unique_pairs" =~ ^[0-9]+$ ]]; then
+                unique_reads_report=$((unique_pairs * 2))
+            fi
+        fi
+
+        # 如果没有report，就用BAM兜底；注意这个会比解析report慢
+        if [ "$unique_reads_report" = "NA" ] && [ -s "$bam" ]; then
+            samtools quickcheck -v "$bam" >/dev/null 2>&1 || true
+            primary_mapped=$(samtools view -@ "$THREADS" -c -F 260 "$bam")
+            mapq1_primary=$(samtools view -@ "$THREADS" -c -F 260 -q 1 "$bam")
+        fi
+
+        if [ -z "$rep" ]; then
+            rep="NA"
+        fi
+        if [ ! -s "$bam" ]; then
+            bam="NA"
+        fi
+
+        echo -e "${sample}\t${Fgroup}\t${lane}\t${total_pairs}\t${unique_pairs}\t${unique_reads_report}\t${primary_mapped}\t${mapq1_primary}\t${bam}\t${rep}" >> "$MAP_TSV"
+    done
+done
+
+# ---------- 3. 合并拆分和mapping结果，并汇总 ----------
+python3 - <<'PY'
+import pandas as pd
+from pathlib import Path
+import numpy as np
+
+out = Path("08_qc_summary/final_single_sample/qc_read_stats")
+
+split = pd.read_csv(out/"split_reads_by_lane.tsv", sep="\t")
+mp = pd.read_csv(out/"mapping_unique_by_lane.tsv", sep="\t")
+
+df = split.merge(mp, on=["sample","F_group","lane"], how="outer")
+
+for c in ["split_R1_reads", "bismark_total_pairs", "bismark_unique_pairs",
+          "unique_mapped_reads_from_report", "bam_primary_mapped_reads",
+          "bam_mapq1_primary_mapped_reads"]:
+    df[c] = pd.to_numeric(df[c], errors="coerce")
+
+# 优先使用Bismark report unique reads；没有report时用MAPQ>=1 primary mapped reads兜底
+df["mapping_unique_reads"] = df["unique_mapped_reads_from_report"]
+df.loc[df["mapping_unique_reads"].isna(), "mapping_unique_reads"] = df["bam_mapq1_primary_mapped_reads"]
+
+df["unique_mapping_rate_vs_split"] = df["mapping_unique_reads"] / (df["split_R1_reads"] * 2)
+df["unique_mapping_rate_vs_bismark_input"] = df["bismark_unique_pairs"] / df["bismark_total_pairs"]
+
+df.to_csv(out/"split_mapping_unique_by_lane.tsv", sep="\t", index=False)
+
+g = df.groupby("F_group", dropna=False).agg(
+    n_lanes=("lane", "count"),
+    split_R1_reads=("split_R1_reads", "sum"),
+    bismark_total_pairs=("bismark_total_pairs", "sum"),
+    bismark_unique_pairs=("bismark_unique_pairs", "sum"),
+    mapping_unique_reads=("mapping_unique_reads", "sum"),
+).reset_index()
+
+g["split_read_pairs"] = g["split_R1_reads"]
+g["unique_mapping_rate_vs_split_pairs"] = g["bismark_unique_pairs"] / g["split_read_pairs"]
+g["unique_mapping_rate_vs_bismark_input"] = g["bismark_unique_pairs"] / g["bismark_total_pairs"]
+g.to_csv(out/"split_mapping_unique_by_Fgroup.tsv", sep="\t", index=False)
+
+total = pd.DataFrame([{
+    "level": "all_F1_to_F8",
+    "n_Fgroups": g["F_group"].nunique(),
+    "n_lanes": df["lane"].count(),
+    "split_R1_reads": df["split_R1_reads"].sum(skipna=True),
+    "bismark_total_pairs": df["bismark_total_pairs"].sum(skipna=True),
+    "bismark_unique_pairs": df["bismark_unique_pairs"].sum(skipna=True),
+    "mapping_unique_reads": df["mapping_unique_reads"].sum(skipna=True),
+}])
+total["unique_mapping_rate_vs_split_pairs"] = total["bismark_unique_pairs"] / total["split_R1_reads"]
+total["unique_mapping_rate_vs_bismark_input"] = total["bismark_unique_pairs"] / total["bismark_total_pairs"]
+total.to_csv(out/"split_mapping_unique_total.tsv", sep="\t", index=False)
+
+# 简单画图
+import matplotlib.pyplot as plt
+
+plot_df = g.copy()
+x = np.arange(len(plot_df))
+
+plt.figure(figsize=(8,5))
+plt.bar(x-0.2, plot_df["split_R1_reads"], width=0.4, label="split read pairs/R1 reads")
+plt.bar(x+0.2, plot_df["bismark_unique_pairs"], width=0.4, label="unique mapped pairs")
+plt.xticks(x, plot_df["F_group"])
+plt.ylabel("Read pairs")
+plt.title("Split reads vs unique mapped reads by F group")
+plt.legend()
+plt.tight_layout()
+plt.savefig(out/"split_vs_unique_mapped_by_Fgroup.png", dpi=300)
+plt.close()
+
+plt.figure(figsize=(8,5))
+plt.bar(x, plot_df["unique_mapping_rate_vs_bismark_input"])
+plt.xticks(x, plot_df["F_group"])
+plt.ylabel("Unique mapping rate")
+plt.title("Unique mapping rate by F group")
+plt.tight_layout()
+plt.savefig(out/"unique_mapping_rate_by_Fgroup.png", dpi=300)
+plt.close()
+
+print("done")
+print(out/"split_mapping_unique_by_lane.tsv")
+print(out/"split_mapping_unique_by_Fgroup.tsv")
+print(out/"split_mapping_unique_total.tsv")
+PY
+
+echo "[INFO] done: $(date)"

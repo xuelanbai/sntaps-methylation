@@ -1,0 +1,25 @@
+#!/bin/bash
+#CSUB -J promoter_core5000_seurat_qcreg
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -R 'span[hosts=1]'
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+#CSUB -o 09_logs/region_umap_paper/filteredCB_promoter_100kb_rescue/promoter_core5000_seurat_qcreg.out
+#CSUB -e 09_logs/region_umap_paper/filteredCB_promoter_100kb_rescue/promoter_core5000_seurat_qcreg.err
+
+set -euo pipefail
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+/share/org/YZWL/yzwl_wujx/.conda/envs/snTAPS_analysis/bin/python 03_scripts/region_matrix_paper/58_umap_region_qcregress_fast.py \
+  --region-counts "08_qc_summary/final_single_sample/region_matrix/snTAPS-FL-1.strict2.promoter_TSS_1.5kb.region_counts.tsv.gz" \
+  --cell-qc "08_qc_summary/final_single_sample/cell_filter_balanced_core/snTAPS-FL-1.balanced_core5000.global_per_cb.tsv" \
+  --outdir "08_qc_summary/final_single_sample/region_umap_paper/filteredCB_promoter_100kb_rescue/promoter_core5000_seurat_qcreg" \
+  --prefix "snTAPS-FL-1.promoter_core5000_seurat_qcreg" \
+  --mode seurat_norm \
+  --qc-keys reads_used,modified_rate \
+  --n-top-regions 1000 \
+  --min-region-cells 20 \
+  --min-regions-per-cell 3 \
+  --n-pcs 30 \
+  --n-clusters 8 \
+  --seed 1

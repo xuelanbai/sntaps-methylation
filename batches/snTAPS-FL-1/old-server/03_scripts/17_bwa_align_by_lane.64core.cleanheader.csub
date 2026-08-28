@@ -1,0 +1,125 @@
+#!/bin/bash
+#CSUB -J snTAPS_bwa64_clean
+#CSUB -q c02
+#CSUB -n 64
+#CSUB -o 09_logs/snTAPS_bwa64_clean.out
+#CSUB -e 09_logs/snTAPS_bwa64_clean.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+PAIR_TABLE=${PROJECT}/08_qc_summary/align_pair_table.tsv
+BWA_PREFIX=$(cat ${PROJECT}/02_reference/pig/bwa_prefix.txt)
+CLEAN_SCRIPT=${PROJECT}/03_scripts/18_clean_fastq_header_for_bwaC.py
+
+cd "$PROJECT"
+
+source /share/apps/anaconda3/etc/profile.d/conda.sh
+conda activate snTAPS_align
+
+mkdir -p 06_align/bam_by_lane
+mkdir -p 09_logs/bwa_by_lane
+mkdir -p 06_align/tmp_pipes
+
+echo "[INFO] clean-header BWA script"
+echo "[INFO] date: $(date)"
+echo "[INFO] BWA_PREFIX=${BWA_PREFIX}"
+echo "[INFO] CLEAN_SCRIPT=${CLEAN_SCRIPT}"
+echo "[INFO] pair table:"
+wc -l "$PAIR_TABLE"
+
+echo "[INFO] bwa:"
+which bwa
+bwa 2>&1 | head -3 || true
+
+echo "[INFO] samtools:"
+which samtools
+samtools --version | head -3
+
+echo "[INFO] check BWA index:"
+for ext in amb ann bwt pac sa
+do
+    ls -lh ${BWA_PREFIX}.${ext}
+done
+
+echo "[INFO] check clean script:"
+ls -lh "$CLEAN_SCRIPT"
+
+run_one_bwa() {
+    set -euo pipefail
+
+    sample="$1"
+    lane="$2"
+    r1="$3"
+    r2="$4"
+
+    outdir="${PROJECT}/06_align/bam_by_lane/${sample}"
+    mkdir -p "$outdir"
+
+    bam="${outdir}/${sample}_${lane}.sorted.bam"
+    bai="${bam}.bai"
+    log="${PROJECT}/09_logs/bwa_by_lane/${sample}_${lane}.bwa.log"
+
+    pipe_dir="${PROJECT}/06_align/tmp_pipes/${sample}_${lane}"
+    rm -rf "$pipe_dir"
+    mkdir -p "$pipe_dir"
+
+    pipe1="${pipe_dir}/R1.clean.pipe"
+    pipe2="${pipe_dir}/R2.clean.pipe"
+
+    if [ -s "$bam" ] && [ -s "$bai" ]; then
+        echo "[INFO] skip existing ${sample} ${lane}" > "$log"
+        return 0
+    fi
+
+    rm -f "$bam" "$bai" "$pipe1" "$pipe2"
+    mkfifo "$pipe1" "$pipe2"
+
+    echo "[INFO] start ${sample} ${lane}: $(date)" > "$log"
+    echo "[INFO] R1=$r1" >> "$log"
+    echo "[INFO] R2=$r2" >> "$log"
+    echo "[INFO] BWA_PREFIX=$BWA_PREFIX" >> "$log"
+
+    python3 "$CLEAN_SCRIPT" "$r1" > "$pipe1" &
+    pid1=$!
+
+    python3 "$CLEAN_SCRIPT" "$r2" > "$pipe2" &
+    pid2=$!
+
+    bwa mem \
+      -t 6 \
+      -C \
+      -M \
+      -R "@RG\tID:${sample}_${lane}\tSM:${sample}\tLB:${sample}\tPL:ILLUMINA" \
+      "$BWA_PREFIX" \
+      "$pipe1" \
+      "$pipe2" \
+      2>> "$log" \
+      | samtools sort -@ 2 -m 2G -o "$bam" - 2>> "$log"
+
+    wait "$pid1"
+    wait "$pid2"
+
+    rm -f "$pipe1" "$pipe2"
+
+    if [ ! -s "$bam" ]; then
+        echo "[ERROR] BAM not generated: $bam" >> "$log"
+        exit 1
+    fi
+
+    samtools index -@ 2 "$bam" 2>> "$log"
+
+    if [ ! -s "$bai" ]; then
+        echo "[ERROR] BAI not generated: $bai" >> "$log"
+        exit 1
+    fi
+
+    echo "[INFO] done ${sample} ${lane}: $(date)" >> "$log"
+}
+
+export -f run_one_bwa
+export PROJECT BWA_PREFIX CLEAN_SCRIPT
+
+tail -n +2 "$PAIR_TABLE" | xargs -P 8 -n 4 bash -c 'run_one_bwa "$@"' _
+
+echo "[INFO] all clean-header bwa finished: $(date)"

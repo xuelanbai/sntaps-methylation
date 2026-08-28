@@ -1,0 +1,66 @@
+#!/bin/bash
+#CSUB -J combine_all_samples
+#CSUB -q c02
+#CSUB -n 16
+#CSUB -o 09_logs/all_samples_merged/combine_all_samples.out
+#CSUB -e 09_logs/all_samples_merged/combine_all_samples.err
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+OUTDIR=${PROJECT}/08_qc_summary/all_samples_merged
+
+cd "$PROJECT"
+
+mkdir -p "$OUTDIR"
+
+echo "[INFO] combine global_per_cb: $(date)"
+
+echo -e "CB\tsample\traw_CB\treads_used\tmodified_calls\tcovered_calls\tmodified_rate\tcovered_bins" \
+  > ${OUTDIR}/all_samples.full_merged.global_per_cb.tsv
+
+for n in {1..8}
+do
+    sample=snTAPS-FL-1_snTAPS-FL-1-${n}
+    f=08_qc_summary/downstream_test/${sample}/merged_full/${sample}.full_merged.global_per_cb.tsv
+
+    if [ ! -s "$f" ]; then
+        echo "[ERROR] missing $f"
+        exit 1
+    fi
+
+    awk -v sample="$sample" '
+    BEGIN{FS=OFS="\t"}
+    NR==1{next}
+    {
+        cell_id=sample"__"$1
+        print cell_id,sample,$1,$2,$3,$4,$5,$6
+    }' "$f" >> ${OUTDIR}/all_samples.full_merged.global_per_cb.tsv
+done
+
+echo "[INFO] combine bin_counts: $(date)"
+
+(
+    echo -e "CB\tsample\traw_CB\tbin_id\tmodified_calls\tcovered_calls\tmodified_rate"
+
+    for n in {1..8}
+    do
+        sample=snTAPS-FL-1_snTAPS-FL-1-${n}
+        f=08_qc_summary/downstream_test/${sample}/merged_full/${sample}.full_merged.bin_counts.tsv.gz
+
+        if [ ! -s "$f" ]; then
+            echo "[ERROR] missing $f" >&2
+            exit 1
+        fi
+
+        zcat "$f" | awk -v sample="$sample" '
+        BEGIN{FS=OFS="\t"}
+        NR==1{next}
+        {
+            cell_id=sample"__"$1
+            print cell_id,sample,$1,$2,$3,$4,$5
+        }'
+    done
+) | gzip -1 > ${OUTDIR}/all_samples.full_merged.bin_counts.tsv.gz
+
+echo "[INFO] done: $(date)"

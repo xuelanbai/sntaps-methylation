@@ -1,0 +1,62 @@
+#!/bin/bash
+#CSUB -J merge_Acl_bw
+#CSUB -q c02
+#CSUB -n 8
+#CSUB -R span[hosts=1]
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+#CSUB -o 09_logs/merge_Acl_bw.out
+#CSUB -e 09_logs/merge_Acl_bw.err
+
+cd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+source /share/org/YZWL/yzwl_wujx/.bashrc
+conda activate foodie_env
+
+OUT=08_qc_summary/final_single_sample/cluster_bigwig_A_no01_from_bam_ref
+GENOME=08_qc_summary/final_single_sample/bigwig_1bp_methyl/genome.canonical.noMT.sizes
+BEDGRAPH2BW=$(which bedGraphToBigWig)
+
+mkdir -p "$OUT/merged"
+
+echo "[INFO] bedGraphToBigWig=$BEDGRAPH2BW"
+
+for C in 0 1 2 3 4 5; do
+  for SIG in methyl hypo coverage; do
+    echo "[INFO] merge C${C} ${SIG}"
+
+    find "$OUT/per_chr" -name "C${C}.*.${SIG}.bedGraph" -size +0c \
+      | sort -V \
+      | xargs cat \
+      | LC_ALL=C sort -k1,1 -k2,2n \
+      > "$OUT/merged/C${C}.${SIG}.sorted.bedGraph"
+
+    if [ ! -s "$OUT/merged/C${C}.${SIG}.sorted.bedGraph" ]; then
+      echo "[WARN] empty merged bedGraph: C${C}.${SIG}"
+      continue
+    fi
+
+    "$BEDGRAPH2BW" \
+      "$OUT/merged/C${C}.${SIG}.sorted.bedGraph" \
+      "$GENOME" \
+      "$OUT/merged/C${C}.${SIG}.bw"
+  done
+done
+
+cd "$OUT/merged"
+
+cp C0.hypo.bw C0_inhibitory_neurons.hypo.bw 2>/dev/null || true
+cp C1.hypo.bw C1_excitatory_neurons_I.hypo.bw 2>/dev/null || true
+cp C2.hypo.bw C2_vascular_associated_cells.hypo.bw 2>/dev/null || true
+cp C3.hypo.bw C3_oligodendrocyte_precursor_cells.hypo.bw 2>/dev/null || true
+cp C4.hypo.bw C4_astrocytes.hypo.bw 2>/dev/null || true
+cp C5.hypo.bw C5_excitatory_neurons_II.hypo.bw 2>/dev/null || true
+
+cp C0.methyl.bw C0_inhibitory_neurons.methyl.bw 2>/dev/null || true
+cp C1.methyl.bw C1_excitatory_neurons_I.methyl.bw 2>/dev/null || true
+cp C2.methyl.bw C2_vascular_associated_cells.methyl.bw 2>/dev/null || true
+cp C3.methyl.bw C3_oligodendrocyte_precursor_cells.methyl.bw 2>/dev/null || true
+cp C4.methyl.bw C4_astrocytes.methyl.bw 2>/dev/null || true
+cp C5.methyl.bw C5_excitatory_neurons_II.methyl.bw 2>/dev/null || true
+
+echo "[INFO] done"
+ls -lh *.bw | head -50

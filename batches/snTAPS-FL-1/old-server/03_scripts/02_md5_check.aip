@@ -1,0 +1,36 @@
+#!/bin/bash
+#CSUB -J snTAPS_md5
+#CSUB -q c02
+#CSUB -n 4
+#CSUB -o 09_logs/snTAPS_md5.out
+#CSUB -e 09_logs/snTAPS_md5.err
+#CSUB -R "span[hosts=1]"
+#CSUB -cwd /share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+
+set -euo pipefail
+
+PROJECT=/share/org/YZWL/yzwl_wujx/Projects/snTAPS_methylation
+RAWROOT=${PROJECT}/00_raw_release/zhaoqiulin0430017/X101SC26014480-Z01-J019_multipath
+LOGDIR=${PROJECT}/09_logs/md5_check
+
+mkdir -p "${LOGDIR}"
+
+find "${RAWROOT}" -name "MD5.txt" | sort | while read -r md5file
+do
+    d=$(dirname "$md5file")
+    name=$(echo "$d" | sed "s#${RAWROOT}/##" | tr '/' '_')
+    log="${LOGDIR}/${name}.md5.log"
+
+    echo "[INFO] Checking: $d"
+    (
+        cd "$d"
+        md5sum -c MD5.txt
+    ) > "$log" 2>&1 || true
+done
+
+echo "[INFO] MD5 check finished."
+echo "[INFO] Failed records:"
+grep -H "FAILED" "${LOGDIR}"/*.md5.log || true
+
+echo "[INFO] OK count:"
+grep -H "OK" "${LOGDIR}"/*.md5.log | wc -l || true
